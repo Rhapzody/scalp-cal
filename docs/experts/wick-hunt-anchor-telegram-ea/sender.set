@@ -1,0 +1,12 @@
+﻿; WickHuntAnchorTelegramSender 1.06. Enter BotToken and ChatID privately in MT5.
+InpBotToken=
+InpChatID=
+InpQueueChannel=anchor
+InpTimeoutMs=15000
+InpSendIntervalSeconds=2
+InpRetryBaseSeconds=5
+InpRetryMaxSeconds=300
+InpLateAfterSeconds=60
+InpShowStatus=true
+InpPhotoWaitSeconds=45
+InpDeleteSentPictures=true

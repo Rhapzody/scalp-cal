@@ -1,0 +1,1 @@
+#include "../ScalpCalculator/ScalpCore.mqh"

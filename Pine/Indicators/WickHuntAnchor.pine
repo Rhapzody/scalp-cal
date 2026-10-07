@@ -1,0 +1,521 @@
+//@version=6
+indicator("WickHuntAnchor 1.05 — H1 / M5", "WickHuntAnchor", overlay = true, max_labels_count = 500, max_lines_count = 500, max_bars_back = 1500, dynamic_requests = true)
+// Explicit global output, independent of signal drawings; hidden from chart and scale.
+plot(close, title = "Hidden output", display = display.none, editable = false)
+// Port of MT5 WickHuntAnchor 1.12, lower-TF-close mode.
+// Main OHLC used for anchors is confirmed. Current main H/L is built from
+// check-TF candles in time order; no final main-candle H/L is imported early.
+
+string mainTF = input.timeframe("60", "mainTF | TF หลัก hunt / anchor", group = "Timeframes")
+string checkTF = input.timeframe("5", "checkTF | TF ย่อย รอแท่งปิดก่อนตรวจ", group = "Timeframes")
+int huntBars = input.int(1, "huntBars | จำนวนหาง TF หลักก่อนหน้าที่ต้องกวาด", minval = 1, maxval = 1000, group = "Hunt")
+float minSweptWickBodyPercent = input.float(10.0, "minSweptWickBodyPercent | หางเดิม/เนื้อขั้นต่ำ % (N=1; 0=ปิด)", minval = 0.0, group = "Hunt")
+float minHuntPoints = input.float(0, "minHuntPoints | ระยะกวาดขั้นต่ำ (points, ต้องเกิน)", minval = 0, group = "Hunt")
+bool enableBuy = input.bool(true, "enableBuy | ตรวจ Buy ด้วยหางล่าง", group = "Hunt")
+bool enableSell = input.bool(true, "enableSell | ตรวจ Sell ด้วยหางบน", group = "Hunt")
+string anchorRule = input.string("FVG OR Strong", "anchorRule | กฎแท่งแรกที่ปลายหางชน", options = ["FVG OR Strong", "FVG AND Strong", "FVG only", "Strong only"], group = "First anchor")
+float maxHeadPercent = input.float(30, "maxHeadPercent | หางหัว Strong ต้องน้อยกว่า (%)", minval = 0, maxval = 100, group = "First anchor")
+bool requireColor = input.bool(false, "requireColor | บังคับสีทั้งสองฝั่ง (เดิม)", group = "First anchor")
+bool requireBuyGreen = input.bool(true, "requireBuyGreen | Buy ต้องชนแท่งเขียว", group = "First anchor")
+bool requireSellRed = input.bool(true, "requireSellRed | Sell ต้องชนแท่งแดง", group = "First anchor")
+bool requireBody = input.bool(false, "requireBody | ปลายหางต้องอยู่ในเนื้อแท่ง anchor", group = "First anchor")
+float minFVGPoints = input.float(0, "minFVGPoints | ขนาดช่อง FVG ขั้นต่ำ (points)", minval = 0, group = "First anchor")
+bool requireMiddleColor = input.bool(false, "requireMiddleColor | สีแท่งกลางต้องตรงกับทิศ FVG", group = "First anchor")
+bool requireFVGDirection = input.bool(false, "requireFVGDirection | ทิศ FVG ต้องตรงกับ Buy/Sell", group = "First anchor")
+int searchBars = input.int(36, "searchBars | ระยะ anchor สูงสุด (0=ประวัติที่เก็บทั้งหมด)", minval = 0, maxval = 5000, group = "History")
+int mainHistory = input.int(1000, "mainHistory | จำนวนแท่ง TF หลักที่เก็บไว้", minval = 3, maxval = 5000, group = "History")
+int checkHistory = input.int(100000, "checkHistory | จำนวนแท่งย่อยที่ขอ (จำกัดตามแผน)", minval = 1000, maxval = 200000, group = "History")
+float pointOverride = input.float(0, "pointOverride | ขนาด point (0=minimum tick)", minval = 0, group = "Display", tooltip = "To compare distance inputs with MT5, enter the broker's _Point, e.g. 0.01. TradingView's minimum tick can differ.")
+int visibleSignals = input.int(100, "visibleSignals | จำนวนสัญญาณล่าสุดที่แสดง", minval = 0, maxval = 500, group = "Display")
+float arrowGapPoints = input.float(200, "arrowGapPoints | ระยะลูกศรห่างแท่ง (points)", minval = 0, group = "Display")
+string arrowSize = input.string("Tiny", "arrowSize | ขนาดลูกศร", options = ["Tiny", "Small", "Normal", "Large"], group = "Display")
+bool showLinks = input.bool(true, "showLinks | แสดงเส้นปลายหางไปยัง anchor", group = "Display")
+bool showStatus = input.bool(true, "showStatus | แสดงตารางสถานะ", group = "Display")
+color buyColor = input.color(color.lime, "buyColor | สีลูกศร Buy", group = "Display")
+color sellColor = input.color(#FF6347, "sellColor | สีลูกศร Sell", group = "Display")
+color linkColor = input.color(color.silver, "linkColor | สีเส้น anchor", group = "Display")
+bool enableAlerts = input.bool(false, "enableAlerts | เปิดแจ้งสัญญาณใหม่", group = "Alerts", tooltip = "Create a TradingView alert using 'Any alert() function call'. No alerts for history loaded when the script starts.")
+
+bool cancellationAlerts = input.bool(true, "cancellationAlerts | แจ้งเมื่อสัญญาณถูกยกเลิก", group = "Alerts")
+
+float pointSize = pointOverride > 0 ? pointOverride : syminfo.mintick
+int mainSeconds = timeframe.in_seconds(mainTF)
+int checkSeconds = timeframe.in_seconds(checkTF)
+int chartSeconds = timeframe.in_seconds()
+string markerSize = arrowSize == "Tiny" ? size.tiny : arrowSize == "Normal" ? size.normal : arrowSize == "Large" ? size.large : size.small
+
+if barstate.isfirst
+    if not chart.is_standard or na(chartSeconds)
+        runtime.error("Use a standard time-based candle chart.")
+    if na(mainSeconds) or na(checkSeconds) or checkSeconds <= 0 or mainSeconds <= 0 or checkSeconds >= mainSeconds or mainSeconds > 86400 or mainSeconds % checkSeconds != 0
+        runtime.error("Check TF must be smaller than main TF, divide it exactly, and main TF must be at most 1D.")
+    if (chartSeconds >= checkSeconds ? chartSeconds % checkSeconds != 0 : checkSeconds % chartSeconds != 0)
+        runtime.error("Chart TF and check TF must divide one another exactly (e.g. 1m / 5m / 15m / 1h / 4h).")
+
+type MainBar
+    int opened
+    int index
+    float o
+    float h
+    float l
+    float c
+    int fvgDirection
+
+type CheckResult
+    int opened
+    int closedAt
+    int mainOpened
+    int buyTime
+    bool buyNew = false
+    int buyCancelled = na
+    float buyTip
+    float buySignalTip
+    int buyAnchor
+    int buyPattern
+    float buyHead
+    int sellTime
+    bool sellNew = false
+    int sellCancelled = na
+    float sellTip
+    float sellSignalTip
+    int sellAnchor
+    int sellPattern
+    float sellHead
+    bool complete
+    int anchors
+    int firstCheck
+
+f_valid(float o, float h, float l, float c) =>
+    not na(o) and not na(h) and not na(l) and not na(c) and l <= o and l <= c and h >= o and h >= c
+
+// The current candle is the THIRD FVG candle. The middle must span the
+// entire gap; a pure session gap is excluded, matching FVGCore.mqh.
+f_fvg() =>
+    int direction = 0
+    bool valid = f_valid(open, high, low, close) and f_valid(open[1], high[1], low[1], close[1]) and f_valid(open[2], high[2], low[2], close[2])
+    if valid
+        float lower = na
+        float upper = na
+        if low > high[2]
+            direction := 1
+            lower := high[2]
+            upper := low
+        else if high < low[2]
+            direction := -1
+            lower := high
+            upper := low[2]
+        if direction != 0
+            bool gapOK = upper - lower + pointSize * 0.000001 >= minFVGPoints * pointSize
+            bool middleOK = low[1] <= lower and high[1] >= upper
+            bool colorOK = not requireMiddleColor or (direction == 1 ? close[1] > open[1] : close[1] < open[1])
+            if not gapOK or not middleOK or not colorOK
+                direction := 0
+    direction
+
+// Every field has a one-MAIN-bar offset. lookahead_on is therefore safe:
+// these candles, FVG flags and N-candle edges were known at main Open.
+f_mainPayload() =>
+    int fvg = f_fvg()
+    float lowest = ta.lowest(low, huntBars)
+    float highest = ta.highest(high, huntBars)
+    float validMean = ta.sma(f_valid(open, high, low, close) ? 1.0 : 0.0, huntBars)
+    bool enough = bar_index >= huntBars - 1 and validMean == 1.0
+    [time[1], bar_index[1], open[1], high[1], low[1], close[1], fvg[1], lowest[1], highest[1], enough[1]]
+
+// Filter the previous MAIN candle, not the hunt or anchor candle.
+f_sweptWickBodyAllowed(float o, float h, float l, float c, int direction) =>
+    bool allowed = true
+    if huntBars == 1 and minSweptWickBodyPercent > 0
+        float body = math.abs(c - o)
+        float wick = direction == 1 ? math.min(o, c) - l : h - math.max(o, c)
+        allowed := f_valid(o, h, l, c) and (body == 0 ? wick > 0 : wick / body >= minSweptWickBodyPercent / 100.0)
+    allowed
+
+f_requireColor(int direction) =>
+    requireColor or (direction == 1 ? requireBuyGreen : requireSellRed)
+
+f_anchor(array<MainBar> bars, float tip, int direction) =>
+    int foundTime = na
+    int pattern = 0
+    float head = na
+    int count = array.size(bars)
+    int oldest = searchBars == 0 ? 0 : math.max(0, count - searchBars)
+    if count > 0
+        for i = count - 1 to oldest
+            MainBar b = array.get(bars, i)
+            if not f_valid(b.o, b.h, b.l, b.c)
+                break
+            if b.l <= tip and tip <= b.h
+                // First collision always ends the search, even on failure.
+                float candleRange = b.h - b.l
+                head := candleRange > 0 ? 100 * (direction == 1 ? b.h - math.max(b.o, b.c) : math.min(b.o, b.c) - b.l) / candleRange : na
+                bool colorOK = not f_requireColor(direction) or (direction == 1 ? b.c > b.o : b.c < b.o)
+                bool bodyOK = not requireBody or (math.min(b.o, b.c) <= tip and tip <= math.max(b.o, b.c))
+                bool strong = not na(head) and head < maxHeadPercent
+                bool fvgOK = b.fvgDirection != 0 and (not requireFVGDirection or b.fvgDirection == direction)
+                // Middle creator is valid only if its third confirmation is
+                // already closed BEFORE the hunt window. Do not peek forward.
+                if not fvgOK and i + 1 < count
+                    MainBar third = array.get(bars, i + 1)
+                    fvgOK := third.fvgDirection != 0 and (not requireFVGDirection or third.fvgDirection == direction)
+                // % classifies Strong only; it does not restrict FVG-only/OR.
+                bool ruleOK = anchorRule == "FVG only" ? fvgOK : anchorRule == "Strong only" ? strong : anchorRule == "FVG OR Strong" ? fvgOK or strong : fvgOK and strong
+                if colorOK and bodyOK and ruleOK
+                    foundTime := b.opened
+                    pattern := (fvgOK ? 1 : 0) + (strong ? 2 : 0)
+                break
+    [foundTime, pattern, head]
+
+// Executes in CHECK timeframe, including when nested in the lower-TF
+// request. Ordinary var rollback prevents unfinished check candles from
+// committing a signal. Only closed results are consumed on the chart.
+f_engine() =>
+    [pt, pi, po, ph, pl, pc, pf, sweepLow, sweepHigh, enough] = request.security(syminfo.tickerid, mainTF, f_mainPayload(), lookahead = barmerge.lookahead_on)
+    var array<MainBar> bars = array.new<MainBar>()
+    var int lastPriorTime = na
+    var int lastPriorIndex = na
+    var int active = na
+    var int previousIndex = na
+    var int firstCheck = time
+    var float mainOpen = na
+    var float runningHigh = na
+    var float runningLow = na
+    var bool complete = false
+    var bool buySent = false
+    var bool sellSent = false
+    var int buyTime = na
+    var int buyAnchor = na
+    var float buyTip = na
+    var float buySignalTip = na
+    var float buyHead = na
+    var int buyPattern = 0
+    var int sellTime = na
+    var int sellAnchor = na
+    var float sellTip = na
+    var float sellSignalTip = na
+    var float sellHead = na
+    var int sellPattern = 0
+    if not na(pt) and (na(lastPriorTime) or pt != lastPriorTime)
+        // Missing entire main windows must not allow a search through
+        // unseen candles. Natural market closures keep consecutive indices.
+        if not na(lastPriorIndex) and pi != lastPriorIndex + 1
+            array.clear(bars)
+        array.push(bars, MainBar.new(pt, pi, po, ph, pl, pc, pf))
+        if array.size(bars) > mainHistory
+            array.shift(bars)
+        lastPriorTime := pt
+        lastPriorIndex := pi
+    int window = time(mainTF)
+    int windowEnd = time_close(mainTF)
+    // Consecutive SOURCE bars can be separated by market closures or inactivity.
+    // A first-loaded partial main window stays ineligible until the next window.
+    bool consecutive = not na(previousIndex) and bar_index == previousIndex + 1
+    if na(active) or window != active
+        active := window
+        mainOpen := open
+        runningHigh := open
+        runningLow := open
+        complete := time == window or consecutive
+        buySent := false
+        sellSent := false
+        buyTime := na
+        buyAnchor := na
+        buyTip := na
+        buySignalTip := na
+        buyHead := na
+        buyPattern := 0
+        sellTime := na
+        sellAnchor := na
+        sellTip := na
+        sellSignalTip := na
+        sellHead := na
+        sellPattern := 0
+    else if not consecutive
+        complete := false
+    bool valid = f_valid(open, high, low, close)
+    if not valid or na(time_close) or time_close <= time or time_close > time + checkSeconds * 1000 or time_close > windowEnd
+        complete := false
+    if valid
+        runningHigh := math.max(runningHigh, high)
+        runningLow := math.min(runningLow, low)
+    // Every closed check result carries its active snapshots and exact
+    // cancellation birth times, so the chart can revise earlier drawings.
+    CheckResult result = CheckResult.new()
+    result.opened := time
+    result.closedAt := time_close
+    result.mainOpened := window
+    result.complete := complete
+    result.anchors := array.size(bars)
+    result.firstCheck := firstCheck
+    if complete and enough
+        // Match MT5 1.12: refresh only when that side's color filter is on.
+        if buySent and f_requireColor(1) and runningLow != buyTip
+            [anchor, pattern, head] = f_anchor(bars, runningLow, 1)
+            if pattern > 0 and anchor == buyAnchor
+                buyTip := runningLow
+                buyPattern := pattern
+                buyHead := head
+            else
+                result.buyCancelled := buyTime
+                buySent := false
+                buyTime := na
+                buyAnchor := na
+                buyTip := na
+                buySignalTip := na
+                buyHead := na
+                buyPattern := 0
+        if sellSent and f_requireColor(-1) and runningHigh != sellTip
+            [anchor, pattern, head] = f_anchor(bars, runningHigh, -1)
+            if pattern > 0 and anchor == sellAnchor
+                sellTip := runningHigh
+                sellPattern := pattern
+                sellHead := head
+            else
+                result.sellCancelled := sellTime
+                sellSent := false
+                sellTime := na
+                sellAnchor := na
+                sellTip := na
+                sellSignalTip := na
+                sellHead := na
+                sellPattern := 0
+        // A changed anchor must pass a fresh reclaim at THIS check close.
+        if enableBuy and not buySent and f_sweptWickBodyAllowed(po, ph, pl, pc, 1) and close >= mainOpen and runningLow < mainOpen and runningLow < sweepLow - minHuntPoints * pointSize
+            [anchor, pattern, head] = f_anchor(bars, runningLow, 1)
+            if pattern > 0
+                buyTime := time_close
+                buySignalTip := runningLow
+                buyTip := runningLow
+                buyAnchor := anchor
+                buyPattern := pattern
+                buyHead := head
+                buySent := true
+                result.buyNew := true
+        if enableSell and not sellSent and f_sweptWickBodyAllowed(po, ph, pl, pc, -1) and close <= mainOpen and runningHigh > mainOpen and runningHigh > sweepHigh + minHuntPoints * pointSize
+            [anchor, pattern, head] = f_anchor(bars, runningHigh, -1)
+            if pattern > 0
+                sellTime := time_close
+                sellSignalTip := runningHigh
+                sellTip := runningHigh
+                sellAnchor := anchor
+                sellPattern := pattern
+                sellHead := head
+                sellSent := true
+                result.sellNew := true
+    result.buyTime := buyTime
+    result.buyTip := buyTip
+    result.buySignalTip := buySignalTip
+    result.buyAnchor := buyAnchor
+    result.buyPattern := buyPattern
+    result.buyHead := buyHead
+    result.sellTime := sellTime
+    result.sellTip := sellTip
+    result.sellSignalTip := sellSignalTip
+    result.sellAnchor := sellAnchor
+    result.sellPattern := sellPattern
+    result.sellHead := sellHead
+    previousIndex := bar_index
+    result
+
+// For a chart SMALLER than check TF, expose the previous completed check
+// result at the next check Open. Offset applies to the whole new object.
+f_confirmedEngine() =>
+    CheckResult result = f_engine()
+    result[1]
+
+// Cache the CHECK result immediately before the current CHART window.
+// This transports the final M5 close at an H1/H4 boundary, even if the
+// preceding realtime chart execution happened just before that close.
+// main_period always denotes the chart TF inside a requested context.
+f_boundaryEngine() =>
+    CheckResult result = f_engine()
+    var CheckResult boundary = na
+    if timeframe.change(timeframe.main_period)
+        boundary := result[1]
+    boundary
+
+f_pattern(int pattern) =>
+    pattern == 3 ? "FVG + Strong" : pattern == 1 ? "FVG" : "Strong"
+
+f_message(CheckResult r, int direction) =>
+    int eventTime = direction == 1 ? r.buyTime : r.sellTime
+    int pattern = direction == 1 ? r.buyPattern : r.sellPattern
+    float tip = direction == 1 ? r.buyTip : r.sellTip
+    float signalTip = direction == 1 ? r.buySignalTip : r.sellSignalTip
+    int anchor = direction == 1 ? r.buyAnchor : r.sellAnchor
+    float head = direction == 1 ? r.buyHead : r.sellHead
+    syminfo.ticker + " WickHuntAnchor " + (direction == 1 ? "BUY" : "SELL") + " | " + mainTF + "/" + checkTF + " | " + f_pattern(pattern) + "\nCheck close: " + str.format_time(eventTime, "yyyy-MM-dd HH:mm:ss", syminfo.timezone) + "\nMain hunt: " + str.format_time(r.mainOpened, "yyyy-MM-dd HH:mm", syminfo.timezone) + "\nFirst anchor: " + str.format_time(anchor, "yyyy-MM-dd HH:mm", syminfo.timezone) + "\nWick at signal: " + str.tostring(signalTip, format.mintick) + " | Latest wick: " + str.tostring(tip, format.mintick) + " | Leading wick: " + str.tostring(head, "#.##") + "%"
+
+var array<label> markers = array.new<label>()
+var array<line> links = array.new<line>()
+var array<int> markerTimes = array.new<int>()
+var array<int> markerDirections = array.new<int>()
+var array<int> markerSetups = array.new<int>()
+var array<int> markerEvents = array.new<int>()
+
+f_remove(int index) =>
+    label.delete(array.remove(markers, index))
+    line oldLink = array.remove(links, index)
+    if not na(oldLink)
+        line.delete(oldLink)
+    array.remove(markerTimes, index)
+    array.remove(markerDirections, index)
+    array.remove(markerSetups, index)
+    array.remove(markerEvents, index)
+
+f_cancel(CheckResult r, int direction, int eventTime) =>
+    if not na(eventTime) and array.size(markers) > 0
+        for i = array.size(markers) - 1 to 0
+            if array.get(markerSetups, i) < r.mainOpened
+                break
+            if array.get(markerSetups, i) == r.mainOpened and array.get(markerEvents, i) == eventTime and array.get(markerDirections, i) == direction
+                f_remove(i)
+                break
+
+f_refresh(CheckResult r, int direction) =>
+    int eventTime = direction == 1 ? r.buyTime : r.sellTime
+    if not na(eventTime) and array.size(markers) > 0
+        for i = array.size(markers) - 1 to 0
+            if array.get(markerSetups, i) < r.mainOpened
+                break
+            if array.get(markerSetups, i) == r.mainOpened and array.get(markerEvents, i) == eventTime and array.get(markerDirections, i) == direction
+                label.set_tooltip(array.get(markers, i), f_message(r, direction))
+                // Frozen link keeps its birth-time coordinates; only tooltip refreshes.
+                break
+
+f_draw(CheckResult r, int direction, int chartTime, float chartLow, float chartHigh) =>
+    if visibleSignals > 0
+        // Delete before creating: stay within the 500-ID drawing limit.
+        while array.size(markers) >= visibleSignals
+            f_remove(0)
+        float y = direction == 1 ? chartLow - arrowGapPoints * pointSize : chartHigh + arrowGapPoints * pointSize
+        label marker = label.new(chartTime, y, "", xloc = xloc.bar_time, yloc = yloc.price, style = direction == 1 ? label.style_triangleup : label.style_triangledown, color = direction == 1 ? buyColor : sellColor, size = markerSize, tooltip = f_message(r, direction))
+        line link = na
+        if showLinks
+            float tip = direction == 1 ? r.buySignalTip : r.sellSignalTip
+            int eventTime = direction == 1 ? r.buyTime : r.sellTime
+            int anchor = direction == 1 ? r.buyAnchor : r.sellAnchor
+            link := line.new(anchor, tip, eventTime, tip, xloc = xloc.bar_time, extend = extend.none, color = linkColor, style = line.style_dotted)
+        array.push(markers, marker)
+        array.push(links, link)
+        array.push(markerTimes, chartTime)
+        array.push(markerDirections, direction)
+        array.push(markerSetups, r.mainOpened)
+        array.push(markerEvents, direction == 1 ? r.buyTime : r.sellTime)
+
+array<CheckResult> results = array.new<CheckResult>()
+bool smallerChart = chartSeconds < checkSeconds
+if chartSeconds > checkSeconds
+    // All check bars within this chart candle, not just its last intrabar.
+    results := request.security_lower_tf(syminfo.tickerid, checkTF, f_engine(), calc_bars_count = checkHistory)
+    CheckResult boundary = request.security(syminfo.tickerid, checkTF, f_boundaryEngine(), lookahead = barmerge.lookahead_on, calc_bars_count = checkHistory)
+    if not na(boundary) and boundary.closedAt <= time
+        array.unshift(results, boundary)
+else if chartSeconds == checkSeconds
+    CheckResult result = f_engine()
+    if barstate.isconfirmed
+        array.push(results, result)
+else
+    CheckResult result = request.security(syminfo.tickerid, checkTF, f_confirmedEngine(), lookahead = barmerge.lookahead_on, calc_bars_count = checkHistory)
+    if timeframe.change(checkTF) and not na(result)
+        array.push(results, result)
+
+// Realtime chart rollback replays this chart bar's closed intrabars and
+// recreates its drawings. varip is ONLY for alert deduplication, not logic.
+varip int armedAt = timenow
+varip int lastBuyAlert = na
+varip int lastSellAlert = na
+varip int lastBuyCancelAlert = na
+varip int lastSellCancelAlert = na
+var int totalBuy = 0
+var int totalSell = 0
+var CheckResult lastResult = na
+var int lastAppliedCheck = na
+bool buySignal = false
+bool sellSignal = false
+bool newLiveBuy = false
+bool newLiveSell = false
+bool newLiveBuyCancelled = false
+bool newLiveSellCancelled = false
+int targetTime = smallerChart ? time[1] : time
+float targetLow = smallerChart ? low[1] : low
+float targetHigh = smallerChart ? high[1] : high
+int targetEnd = smallerChart ? time_close[1] : time_close
+
+for r in results
+    // closedAt == targetEnd belongs to the candle that just closed.
+    bool closed = not na(r.closedAt) and r.closedAt <= timenow
+    // Boundary results belong to the preceding chart candle; all others
+    // retain the ordinary mapping (including the smaller-chart offset).
+    bool previousChart = chartSeconds > checkSeconds and r.closedAt <= time
+    int plottedTime = previousChart ? time[1] : targetTime
+    int plottedEnd = previousChart ? time_close[1] : targetEnd
+    float plottedLow = previousChart ? low[1] : targetLow
+    float plottedHigh = previousChart ? high[1] : targetHigh
+    bool mapped = not na(plottedTime) and r.closedAt > plottedTime and r.closedAt <= plottedEnd
+    bool unseen = na(lastAppliedCheck) or r.closedAt > lastAppliedCheck
+    if closed and mapped and unseen
+        lastAppliedCheck := r.closedAt
+        lastResult := r
+        if not na(r.buyCancelled)
+            totalBuy := math.max(0, totalBuy - 1)
+            f_cancel(r, 1, r.buyCancelled)
+            if barstate.isrealtime and r.closedAt >= armedAt and (na(lastBuyCancelAlert) or r.closedAt > lastBuyCancelAlert)
+                newLiveBuyCancelled := true
+                lastBuyCancelAlert := r.closedAt
+                if enableAlerts and cancellationAlerts
+                    alert(syminfo.ticker + " WickHuntAnchor BUY CANCELLED | original check close " + str.format_time(r.buyCancelled, "yyyy-MM-dd HH:mm:ss", syminfo.timezone) + " | wick extended / first anchor changed or failed", alert.freq_all)
+        if not na(r.sellCancelled)
+            totalSell := math.max(0, totalSell - 1)
+            f_cancel(r, -1, r.sellCancelled)
+            if barstate.isrealtime and r.closedAt >= armedAt and (na(lastSellCancelAlert) or r.closedAt > lastSellCancelAlert)
+                newLiveSellCancelled := true
+                lastSellCancelAlert := r.closedAt
+                if enableAlerts and cancellationAlerts
+                    alert(syminfo.ticker + " WickHuntAnchor SELL CANCELLED | original check close " + str.format_time(r.sellCancelled, "yyyy-MM-dd HH:mm:ss", syminfo.timezone) + " | wick extended / first anchor changed or failed", alert.freq_all)
+        if r.buyNew
+            buySignal := true
+            totalBuy += 1
+            f_draw(r, 1, plottedTime, plottedLow, plottedHigh)
+            if barstate.isrealtime and r.closedAt >= armedAt and (na(lastBuyAlert) or r.closedAt > lastBuyAlert)
+                newLiveBuy := true
+                lastBuyAlert := r.closedAt
+                if enableAlerts
+                    alert(f_message(r, 1), alert.freq_all)
+        if r.sellNew
+            sellSignal := true
+            totalSell += 1
+            f_draw(r, -1, plottedTime, plottedLow, plottedHigh)
+            if barstate.isrealtime and r.closedAt >= armedAt and (na(lastSellAlert) or r.closedAt > lastSellAlert)
+                newLiveSell := true
+                lastSellAlert := r.closedAt
+                if enableAlerts
+                    alert(f_message(r, -1), alert.freq_all)
+
+        f_refresh(r, 1)
+        f_refresh(r, -1)
+
+// Keep markers on a still-growing CHART candle outside its latest wick.
+if array.size(markers) > 0
+    for i = array.size(markers) - 1 to 0
+        if array.get(markerTimes, i) != time
+            break
+        int direction = array.get(markerDirections, i)
+        label.set_y(array.get(markers, i), direction == 1 ? low - arrowGapPoints * pointSize : high + arrowGapPoints * pointSize)
+
+plot(buySignal ? 1 : 0, "Buy events on this update", display = display.data_window)
+plot(sellSignal ? 1 : 0, "Sell events on this update", display = display.data_window)
+alertcondition(enableAlerts and newLiveBuy, "WickHuntAnchor BUY", "WickHuntAnchor BUY on {{ticker}}")
+alertcondition(enableAlerts and newLiveSell, "WickHuntAnchor SELL", "WickHuntAnchor SELL on {{ticker}}")
+
+alertcondition(enableAlerts and cancellationAlerts and newLiveBuyCancelled, "WickHuntAnchor BUY CANCELLED", "WickHuntAnchor BUY cancelled on {{ticker}}")
+alertcondition(enableAlerts and cancellationAlerts and newLiveSellCancelled, "WickHuntAnchor SELL CANCELLED", "WickHuntAnchor SELL cancelled on {{ticker}}")
+
+var table status = table.new(position.bottom_left, 1, 3, bgcolor = color.new(color.black, 20))
+if barstate.islast and showStatus
+    table.cell(status, 0, 0, "WickHuntAnchor 1.05 | " + mainTF + "/" + checkTF + " | Check close", text_color = color.white, text_size = size.small)
+    table.cell(status, 0, 1, "BUY " + str.tostring(totalBuy) + " | SELL " + str.tostring(totalSell) + " | arrows " + str.tostring(array.size(markers)), text_color = color.white, text_size = size.small)
+    string coverage = "Waiting for check-TF history"
+    if not na(lastResult)
+        coverage := "Check history from " + str.format_time(lastResult.firstCheck, "yyyy-MM-dd HH:mm", syminfo.timezone) + " | anchors " + str.tostring(lastResult.anchors) + " | " + (lastResult.complete ? "Complete main window" : "Partial / missing check bars: wait")
+    table.cell(status, 0, 2, coverage, text_color = color.silver, text_size = size.tiny)

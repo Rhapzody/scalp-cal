@@ -1,0 +1,262 @@
+{
+  "scalp-calculator": {
+    "name": "ScalpCalculator",
+    "category": "experts",
+    "source": "MQL5/Experts/ScalpCalculator",
+    "tests": [
+      "tests/scalp-calculator",
+      "tests/instant-engulf"
+    ],
+    "checks": 84474,
+    "ui_layout_scenarios": 1670,
+    "ui_state_checks": 17,
+    "manual_buffer_checks": 96
+  },
+  "instant-engulf": {
+    "name": "InstantEngulf",
+    "category": "experts",
+    "source": "MQL5/Experts/InstantEngulf",
+    "tests": [
+      "tests/instant-engulf",
+      "tests/scalp-calculator"
+    ],
+    "checks": 4116
+  },
+  "tv-style-macd": {
+    "name": "TVStyleMACD",
+    "category": "indicators",
+    "source": "MQL5/Indicators/TVStyleMACD",
+    "tests": [
+      "tests/tv-style-macd"
+    ],
+    "checks": 70688
+  },
+  "pa-reversal": {
+    "name": "PAReversal",
+    "category": "indicators",
+    "source": "MQL5/Indicators/PAReversal",
+    "tests": [
+      "tests/pa-reversal"
+    ],
+    "checks": 10082
+  },
+  "pa-reversal-trader": {
+    "name": "PAReversalTrader",
+    "category": "experts",
+    "source": "MQL5/Experts/PAReversalTrader",
+    "tests": [
+      "tests/pa-reversal-trader"
+    ],
+    "checks": 22,
+    "extra_files": [
+      "docs/experts/pa-reversal-trader/README.md",
+      "MQL5/Indicators/PAReversal/PAReversalCore.mqh",
+      "MQL5/Experts/ScalpCalculator/ScalpCore.mqh",
+      "MQL5/Experts/ScalpCalculator/ScalpBroker.mqh"
+    ]
+  },
+  "macd-swing-count": {
+    "name": "MACDSwingCount",
+    "category": "indicators",
+    "source": "MQL5/Indicators/MACDSwingCount",
+    "tests": [
+      "tests/macd-swing-count"
+    ],
+    "checks": 42454
+  },
+  "trade-journal": {
+    "name": "TradeJournal",
+    "category": "experts",
+    "source": "MQL5/Experts/TradeJournal",
+    "tests": [
+      "tests/trade-journal"
+    ],
+    "checks": 287,
+    "companions": [
+      {
+        "source": "MQL5/Scripts/TradeJournal",
+        "name": "ExportJournalReport"
+      }
+    ],
+    "extra_files": [
+      "MQL5/Scripts/TradeJournal/Report.html",
+      "MQL5/Scripts/TradeJournal/ReportModel.js",
+      "MQL5/Scripts/TradeJournal/ReportUI.js",
+      "scripts/build-journal-template.py",
+      "docs/experts/trade-journal/journal-demo.html",
+      "MQL5/Scripts/TradeJournal/NotesModel.js",
+      "MQL5/Scripts/TradeJournal/ReportNotebook.js"
+    ]
+  },
+  "macd-zone-trader": {
+    "name": "MACDZoneTrader",
+    "category": "experts",
+    "source": "MQL5/Experts/MACDZoneTrader",
+    "tests": [
+      "tests/macd-zone-trader"
+    ],
+    "checks": 3806,
+    "extra_files": [
+      "docs/experts/macd-zone-trader/tester-demo.set"
+    ]
+  },
+  "macd-zone-pullback": {
+    "name": "MACDZonePullback",
+    "category": "indicators",
+    "source": "MQL5/Indicators/MACDZonePullback",
+    "tests": [
+      "tests/macd-zone-pullback"
+    ],
+    "checks": 2581
+  },
+  "imbalance-flow": {
+    "name": "ImbalanceFlow",
+    "category": "indicators",
+    "source": "MQL5/Indicators/ImbalanceFlow",
+    "tests": [
+      "tests/imbalance-flow"
+    ],
+    "checks": 5043
+  },
+  "engulf-imbalance-flow": {
+    "name": "EngulfImbalanceFlow",
+    "category": "indicators",
+    "source": "MQL5/Indicators/EngulfImbalanceFlow",
+    "tests": [],
+    "checks": 0
+  },
+  "engulf-flow": {
+    "name": "EngulfFlow",
+    "category": "indicators",
+    "source": "MQL5/Indicators/EngulfFlow",
+    "tests": [
+      "tests/engulf-flow"
+    ],
+    "checks": 21019
+  },
+  "trend-sweep-reclaim": {
+    "name": "TrendSweepReclaim",
+    "category": "indicators",
+    "source": "MQL5/Indicators/TrendSweepReclaim",
+    "tests": [
+      "tests/trend-sweep-reclaim"
+    ],
+    "checks": 450
+  },
+  "trend-sweep-trader": {
+    "name": "TrendSweepTrader",
+    "category": "experts",
+    "source": "MQL5/Experts/TrendSweepTrader",
+    "tests": [
+      "tests/trend-sweep-trader"
+    ],
+    "checks": 576,
+    "extra_files": [
+      "docs/experts/trend-sweep-trader/tester-demo.set"
+    ]
+  },
+  "opening-range-retest": {
+    "name": "OpeningRangeRetest",
+    "category": "indicators",
+    "source": "MQL5/Indicators/OpeningRangeRetest",
+    "tests": [
+      "tests/opening-range-retest"
+    ],
+    "checks": 16
+  },
+  "opening-range-trader": {
+    "name": "OpeningRangeTrader",
+    "category": "experts",
+    "source": "MQL5/Experts/OpeningRangeTrader",
+    "tests": [
+      "tests/opening-range-trader"
+    ],
+    "checks": 5,
+    "extra_files": [
+      "docs/experts/opening-range-trader/tester-demo.set",
+      "MQL5/Indicators/OpeningRangeRetest/OpeningCore.mqh",
+      "MQL5/Indicators/OpeningRangeRetest/OpeningInputs.mqh",
+      "MQL5/Experts/ScalpCalculator/ScalpCore.mqh",
+      "MQL5/Experts/ScalpCalculator/ScalpBroker.mqh"
+    ]
+  },
+  "wick-hunt-sr-flow": {
+    "name": "WickHuntSRFlow",
+    "category": "indicators",
+    "source": "MQL5/Indicators/WickHuntSRFlow",
+    "tests": [
+      "tests/wick-hunt-sr-flow"
+    ],
+    "checks": 0,
+    "extra_files": [
+      "docs/indicators/wick-hunt-sr-flow/m15-m1-history.set"
+    ]
+  },
+  "wick-hunt-anchor": {
+    "name": "WickHuntAnchor",
+    "category": "indicators",
+    "source": "MQL5/Indicators/WickHuntAnchor",
+    "tests": [],
+    "checks": 0,
+    "extra_files": [
+      "docs/indicators/wick-hunt-anchor/m15-live.set",
+      "docs/indicators/wick-hunt-anchor/m15-history.set",
+      "docs/indicators/wick-hunt-anchor/h1-m5.set",
+      "docs/indicators/wick-hunt-anchor/h1-m5-fvg-only.set",
+      "docs/indicators/wick-hunt-anchor/h1-m5-or-buy-green.set",
+      "docs/indicators/wick-hunt-anchor/h1-m5-or-colors.set"
+    ]
+  },
+  "wick-hunt-telegram-ea": {
+    "name": "WickHuntTelegramEA",
+    "category": "experts",
+    "source": "MQL5/Experts/WickHuntTelegramEA",
+    "tests": [],
+    "checks": 0,
+    "companions": [
+      {
+        "name": "WickHuntTelegramSender",
+        "source": "MQL5/Experts/WickHuntTelegramEA"
+      }
+    ],
+    "extra_files": [
+      "MQL5/Indicators/WickHuntSRFlow/EngulfFlowCore.mqh",
+      "MQL5/Indicators/WickHuntSRFlow/EngulfImbalanceCore.mqh",
+      "MQL5/Indicators/WickHuntSRFlow/FVGCore.mqh",
+      "MQL5/Indicators/WickHuntSRFlow/SwingCore.mqh",
+      "MQL5/Indicators/WickHuntSRFlow/WickHuntContextCore.mqh",
+      "MQL5/Indicators/WickHuntSRFlow/WickHuntSRCore.mqh",
+      "docs/indicators/wick-hunt-sr-flow/README.md",
+      "docs/indicators/wick-hunt-sr-flow/testing.md"
+    ]
+  },
+  "wick-hunt-anchor-telegram-ea": {
+    "name": "WickHuntAnchorTelegramEA",
+    "category": "experts",
+    "source": "MQL5/Experts/WickHuntAnchorTelegramEA",
+    "tests": [],
+    "checks": 0,
+    "companions": [
+      {
+        "name": "WickHuntAnchorTelegramSender",
+        "source": "MQL5/Experts/WickHuntAnchorTelegramEA"
+      }
+    ],
+    "extra_files": [
+      "MQL5/Indicators/WickHuntAnchor/WickHuntAnchorCore.mqh",
+      "MQL5/Indicators/WickHuntAnchor/FVGCore.mqh",
+      "MQL5/Indicators/WickHuntAnchor/WickHuntQuoteSessions.mqh",
+      "scripts/sync-wick-hunt-anchor-runtime.py",
+      "docs/experts/wick-hunt-anchor-telegram-ea/h1-m5-or-colors.set",
+      "docs/experts/wick-hunt-anchor-telegram-ea/m15-m1-or-colors.set",
+      "docs/experts/wick-hunt-anchor-telegram-ea/h4-m5-or-colors.set",
+      "docs/experts/wick-hunt-anchor-telegram-ea/sender.set",
+      "MQL5/Indicators/WickHuntAnchor/WickHuntAnchor.mq5",
+      "docs/indicators/wick-hunt-anchor/README.md",
+      "docs/experts/wick-hunt-anchor-telegram-ea/m15-m1-chat.set",
+      "docs/experts/wick-hunt-anchor-telegram-ea/h1-m5-chat.set",
+      "docs/experts/wick-hunt-anchor-telegram-ea/sender-m15-m1.set",
+      "docs/experts/wick-hunt-anchor-telegram-ea/sender-h1-m5.set"
+    ]
+  }
+}

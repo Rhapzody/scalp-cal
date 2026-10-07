@@ -1,0 +1,1 @@
+Archived results under version 1.00: breakout and reclaim could occur in either order. The current report uses version 1.01 reclaim-first rules. These are saved results, not a runner for the old rule.

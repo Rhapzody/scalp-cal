@@ -1,0 +1,13 @@
+; WickHuntAnchor 1.00: M15 Close confirms reclaim; closed-candle history
+; This is a different observation rule from immediate live tick reclaim.
+InpHuntTF=15
+InpObservationMode=1
+InpAnchorRule=0
+InpStrongHeadWickPercent=10
+InpRequireAnchorColor=false
+InpRequireBodyTouch=false
+InpRequireFVGDirection=false
+InpVisibleSignals=5000
+InpRequireBuyAnchorGreen=true
+InpRequireSellAnchorRed=true
+InpSearchBars=36

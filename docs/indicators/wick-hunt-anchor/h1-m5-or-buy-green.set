@@ -1,0 +1,30 @@
+; WickHuntAnchor 1.12: H1/M5 OR, Buy anchor green, Strong 20%, arrows 1 / 60 points
+; Strong % filters the Strong branch only; FVG stays independent in OR.
+InpHuntTF=16385
+InpHuntBars=1
+InpMinHuntPoints=0
+InpObservationMode=2
+InpHistoryBars=0
+InpSearchBars=36
+InpAnchorRule=0
+InpStrongHeadWickPercent=20
+InpRequireAnchorColor=false
+InpRequireBodyTouch=false
+InpMinFVGGapPoints=0
+InpRequireFVGMiddleDirection=false
+InpRequireFVGDirection=false
+InpEnableBuy=true
+InpEnableSell=true
+InpVisibleSignals=100
+InpShowAnchorLinks=true
+InpBuyColor=3329330
+InpSellColor=4678655
+InpAnchorColor=12632256
+InpArrowWidth=1
+InpArrowGapPoints=60
+InpPopupAlert=false
+InpCheckTF=5
+InpCheckHistoryBars=0
+InpRequireBuyAnchorGreen=true
+InpRequireSellAnchorRed=true
+InpMinSweptWickBodyPercent=10

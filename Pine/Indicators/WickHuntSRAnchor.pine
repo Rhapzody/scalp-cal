@@ -1,0 +1,706 @@
+//@version=6
+indicator("WickHunt SR + Anchor 1.02", "WickHunt SR + Anchor", overlay = true, max_labels_count = 500, max_lines_count = 500, max_bars_back = 2000, dynamic_requests = true)
+// Two independent engines: MT5 WickHuntSRFlow 1.06 lower-close mode and
+// WickHuntAnchor 1.01 lower-close mode. Anchor is NOT an extra SR filter.
+
+string mainTF = input.timeframe("60", "Main / hunt timeframe", group = "Timeframes")
+string checkTF = input.timeframe("5", "Check timeframe (closed candles)", group = "Timeframes")
+bool enableSR = input.bool(true, "Enable SR signals", group = "Signals")
+bool enableAnchor = input.bool(true, "Enable Anchor signals", group = "Signals")
+bool enableBuy = input.bool(true, "Enable Buy", group = "Signals")
+bool enableSell = input.bool(true, "Enable Sell", group = "Signals")
+int fastLength = input.int(12, "Fast EMA", minval = 1, maxval = 1000, group = "MACD Histogram swings")
+int slowLength = input.int(26, "Slow EMA", minval = 1, maxval = 1000, group = "MACD Histogram swings")
+int signalLength = input.int(9, "Signal EMA", minval = 1, maxval = 1000, group = "MACD Histogram swings")
+int warmupInput = input.int(0, "Warmup: 0 = max(Fast, Slow) + Signal - 1", minval = 0, maxval = 100000, group = "MACD Histogram swings")
+int srCount = input.int(10, "Retained confirmed swings per timeframe", minval = 1, maxval = 1000, group = "MACD Histogram swings")
+string srAnchor = input.string("Wick", "SR price on pivot candle", options = ["Wick", "Body"], group = "MACD Histogram swings")
+string scenario = input.string("Breakout + Pullback", "Main-TF scenario", options = ["Breakout + Pullback", "Breakout", "Pullback", "Legacy"], group = "SR: main context")
+int srHuntBars = input.int(1, "Breakout / Legacy: previous tails to sweep", minval = 1, maxval = 1000, group = "SR: main context")
+int pullHuntBars = input.int(2, "Pullback: previous tails to sweep", minval = 2, maxval = 1000, group = "SR: main context")
+int touchBars = input.int(5, "Prior main candles touching known SR", minval = 1, maxval = 1000, group = "SR: main context")
+float srMinHunt = input.float(0, "Minimum hunt distance (points)", minval = 0, group = "SR: main context")
+int srSearchBars = input.int(0, "FVG anchor search: 0 = retained history", minval = 0, maxval = 5000, group = "SR: main context")
+float srMinFVG = input.float(0, "Minimum FVG gap (points)", minval = 0, group = "SR: main context")
+bool srMiddleColor = input.bool(false, "Require FVG middle candle direction", group = "SR: main context")
+float srMaxHead = input.float(30, "FVG anchor: leading wick at most (%)", minval = 0, maxval = 100, group = "SR: main context")
+int confirmBars = input.int(1, "Consecutive hold candles AFTER break", minval = 1, maxval = 1000, group = "SR: lower confirmation")
+int retestBars = input.int(8, "Retest candles AFTER holds: 0 = direct break", minval = 0, maxval = 1000, group = "SR: lower confirmation")
+float closeBuffer = input.float(0, "Break / hold close buffer (points)", minval = 0, group = "SR: lower confirmation")
+float retestTolerance = input.float(0, "Retest tolerance (points)", minval = 0, group = "SR: lower confirmation")
+string retestMode = input.string("High / Low", "Closed retest observation", options = ["High / Low", "Close"], group = "SR: lower confirmation")
+int anchorHuntBars = input.int(1, "Previous tails to sweep", minval = 1, maxval = 1000, group = "Anchor: independent rules")
+float anchorMinHunt = input.float(0, "Minimum hunt distance (points)", minval = 0, group = "Anchor: independent rules")
+string anchorRule = input.string("FVG OR Strong", "First anchor rule", options = ["FVG OR Strong", "FVG AND Strong"], group = "Anchor: independent rules")
+float anchorMaxHead = input.float(10, "Leading wick strictly below (%)", minval = 0, maxval = 100, group = "Anchor: independent rules")
+int anchorSearchBars = input.int(0, "Search: 0 = retained history", minval = 0, maxval = 5000, group = "Anchor: independent rules")
+bool anchorColor = input.bool(false, "Require green Buy / red Sell anchor", group = "Anchor: independent rules")
+bool anchorBody = input.bool(false, "Require tip inside anchor body", group = "Anchor: independent rules")
+float anchorMinFVG = input.float(0, "Minimum FVG gap (points)", minval = 0, group = "Anchor: independent rules")
+bool anchorMiddleColor = input.bool(false, "Require FVG middle candle direction", group = "Anchor: independent rules")
+bool anchorFVGDirection = input.bool(false, "Require FVG direction to match signal", group = "Anchor: independent rules")
+int mainHistory = input.int(1000, "Main candles retained for anchor search", minval = 3, maxval = 5000, group = "History")
+int checkHistory = input.int(100000, "Requested check candles (plan limits apply)", minval = 1000, maxval = 200000, group = "History")
+float pointOverride = input.float(0, "Point size: 0 = minimum tick", minval = 0, group = "Display", tooltip = "Set the MT5 broker's _Point to compare distance inputs; TradingView's minimum tick may differ.")
+int visibleSignals = input.int(100, "Recent signals to draw (both families total)", minval = 0, maxval = 450, group = "Display")
+float srArrowGap = input.float(30, "SR arrow gap from chart candle (points)", minval = 0, group = "Display")
+float anchorArrowGap = input.float(80, "Anchor triangle gap from chart candle (points)", minval = 0, group = "Display")
+string arrowSize = input.string("Small", "Marker size", options = ["Tiny", "Small", "Normal", "Large"], group = "Display")
+color srBuyColor = input.color(color.lime, "SR Buy", group = "Display")
+color srSellColor = input.color(#FF6347, "SR Sell", group = "Display")
+color anchorBuyColor = input.color(color.aqua, "Anchor Buy", group = "Display")
+color anchorSellColor = input.color(color.orange, "Anchor Sell", group = "Display")
+bool showSignalLines = input.bool(true, "SR event: frozen break / retest line", group = "Display")
+bool showAnchorLinks = input.bool(true, "Anchor event: dotted link to first anchor", group = "Display")
+bool showLowerSR = input.bool(true, "Show latest check-TF SR (dotted)", group = "Display")
+bool showMainSR = input.bool(true, "Show latest main-TF SR (dashed)", group = "Display")
+int displaySRCount = input.int(10, "Displayed SR levels per TF", minval = 1, maxval = 25, group = "Display")
+bool showStatus = input.bool(true, "Show legend / status", group = "Display")
+bool enableAlerts = input.bool(false, "Enable new live alerts", group = "Alerts")
+bool alertSR = input.bool(true, "Alert SR signals", group = "Alerts")
+bool alertAnchor = input.bool(true, "Alert Anchor signals", group = "Alerts")
+
+float pointSize = pointOverride > 0 ? pointOverride : syminfo.mintick
+int mainSeconds = timeframe.in_seconds(mainTF)
+int checkSeconds = timeframe.in_seconds(checkTF)
+int chartSeconds = timeframe.in_seconds()
+int checkMs = checkSeconds * 1000
+int warmup = warmupInput > 0 ? warmupInput : math.max(fastLength, slowLength) + signalLength - 1
+int contextRequired = math.max(warmup + 1, math.max(touchBars, math.max(srHuntBars, pullHuntBars)))
+int mainCalcBars = math.min(100000, int(math.ceil(float(checkHistory) * checkSeconds / mainSeconds)) + mainHistory + contextRequired + 10)
+string markerSize = arrowSize == "Tiny" ? size.tiny : arrowSize == "Normal" ? size.normal : arrowSize == "Large" ? size.large : size.small
+if barstate.isfirst
+    if not chart.is_standard or na(chartSeconds)
+        runtime.error("Use a standard time-based candle chart.")
+    if checkSeconds >= mainSeconds or mainSeconds > 86400 or mainSeconds % checkSeconds != 0
+        runtime.error("Check TF must divide main TF exactly and be smaller; main TF must be at most 1D.")
+    if (chartSeconds >= checkSeconds ? chartSeconds % checkSeconds != 0 : checkSeconds % chartSeconds != 0)
+        runtime.error("Chart TF and check TF must divide one another exactly.")
+
+type Swing
+    int kind
+    float price
+    float body
+    int pivot
+    int confirmed
+    int closedAt
+
+type MacdState
+    int count = 0
+    float fast = 0
+    float slow = 0
+    float signalEMA = 0
+    float histogram = 0
+    int direction = 0
+    float extreme = na
+    float extremeBody = na
+    int extremeTime = na
+
+type Trend
+    int direction = 0
+    bool ready = false
+    int breakTime = na
+    float sr = na
+    int pivot = na
+    float pivotPrice = na
+    int confirmed = na
+
+type MainBar
+    int opened
+    int index
+    float o
+    float h
+    float l
+    float c
+    int srFVG
+    int anchorFVG
+
+type MainInfo
+    MainBar candle
+    Swing swing
+    float srLow
+    float srHigh
+    float pullLow
+    float pullHigh
+    float anchorLow
+    float anchorHigh
+    bool enoughSR
+    bool enoughPull
+    bool enoughAnchor
+    float touchBuy
+    float touchSell
+    int trendDirection
+    bool trendReady
+    float trendSR
+    float trendPivotPrice
+    int trendPivot
+    int trendConfirmed
+
+type Candidate
+    float sr
+    int srType
+    int pivot
+    int breakOpened
+    int breakClosed
+    int holds = 0
+    int holdClosed = na
+    int deadline = na
+
+type Setup
+    int reclaimed = na
+    bool sent = false
+    int pattern = 0
+    float contextSR = na
+    int anchor = na
+    int trendPivot = na
+    float tip = na
+    Candidate candidate = na
+
+type Signal
+    int family
+    int direction
+    int closedAt
+    int mainOpened
+    int pattern
+    float tip
+    int anchor
+    float head
+    float sr
+    int srType
+    int srPivot
+    int breakOpened
+    int holdClosed
+    int retestBar
+    int reclaimed
+    float contextSR
+    int trendPivot
+
+type CheckResult
+    int closedAt
+    Signal srBuy = na
+    Signal srSell = na
+    Signal anchorBuy = na
+    Signal anchorSell = na
+    Swing lowerSwing = na
+    Swing mainSwing = na
+    bool complete = false
+    int firstCheck = na
+    int anchors = 0
+
+f_valid(float o, float h, float l, float c) =>
+    not na(o) and not na(h) and not na(l) and not na(c) and l <= o and l <= c and h >= o and h >= c
+
+f_price(Swing e) =>
+    srAnchor == "Body" ? e.body : e.price
+
+f_cross(int direction, float previous, float last, float level) =>
+    direction == 1 ? previous <= level and last > level : previous >= level and last < level
+
+// Exact SwingCore.mqh EMA seed and Histogram-color mode. The confirming
+// candle updates the old extreme FIRST, then starts the adjacent leg.
+f_swing() =>
+    var MacdState s = MacdState.new()
+    Swing event = na
+    if not f_valid(open, high, low, close)
+        s := MacdState.new()
+    else
+        float previousHistogram = s.histogram
+        bool hasPrevious = s.count > 0
+        if s.count == 0
+            s.fast := close
+            s.slow := close
+            s.signalEMA := 0
+        else
+            float af = 2.0 / (fastLength + 1)
+            float al = 2.0 / (slowLength + 1)
+            float ag = 2.0 / (signalLength + 1)
+            s.fast := af * close + (1 - af) * s.fast
+            s.slow := al * close + (1 - al) * s.slow
+            s.signalEMA := ag * (s.fast - s.slow) + (1 - ag) * s.signalEMA
+        s.histogram := s.fast - s.slow - s.signalEMA
+        s.count += 1
+        if s.count >= warmup
+            int side = not hasPrevious or (s.histogram == 0 and previousHistogram == 0) ? 0 : s.histogram > previousHistogram ? 1 : -1
+            if s.direction == 0
+                if side != 0
+                    s.direction := side
+                    s.extreme := side == 1 ? high : low
+                    s.extremeBody := side == 1 ? math.max(open, close) : math.min(open, close)
+                    s.extremeTime := time
+            else
+                if (s.direction == 1 and high >= s.extreme) or (s.direction == -1 and low <= s.extreme)
+                    s.extreme := s.direction == 1 ? high : low
+                    s.extremeBody := s.direction == 1 ? math.max(open, close) : math.min(open, close)
+                    s.extremeTime := time
+                if side != 0 and side != s.direction
+                    event := Swing.new(s.direction, s.extreme, s.extremeBody, s.extremeTime, time, time_close)
+                    s.direction := side
+                    s.extreme := side == 1 ? high : low
+                    s.extremeBody := side == 1 ? math.max(open, close) : math.min(open, close)
+                    s.extremeTime := time
+    event
+
+f_addLevel(array<Swing> levels, Swing event) =>
+    if not na(event)
+        if array.size(levels) >= srCount
+            array.shift(levels)
+        array.push(levels, event)
+
+f_fvg(float minPoints, bool requireMiddle) =>
+    int direction = 0
+    if f_valid(open, high, low, close) and f_valid(open[1], high[1], low[1], close[1]) and f_valid(open[2], high[2], low[2], close[2])
+        float lower = na
+        float upper = na
+        if low > high[2]
+            direction := 1
+            lower := high[2]
+            upper := low
+        else if high < low[2]
+            direction := -1
+            lower := high
+            upper := low[2]
+        if direction != 0
+            bool gapOK = upper - lower + pointSize * 0.000001 >= minPoints * pointSize
+            bool middleOK = low[1] <= lower and high[1] >= upper
+            bool colorOK = not requireMiddle or (direction == 1 ? close[1] > open[1] : close[1] < open[1])
+            if not gapOK or not middleOK or not colorOK
+                direction := 0
+    direction
+
+f_newTrend(array<Swing> levels, int direction) =>
+    Trend result = na
+    bool originFound = false
+    int count = array.size(levels)
+    if count > 0
+        for i = count - 1 to 0
+            Swing e = array.get(levels, i)
+            if e.kind == -direction and e.confirmed < time
+                originFound := true
+                break
+        if originFound
+            for i = count - 1 to 0
+                Swing e = array.get(levels, i)
+                if e.kind == direction and e.confirmed < time and f_cross(direction, close[1], close, f_price(e))
+                    result := Trend.new(direction, false, time, f_price(e), na, na, na)
+                    break
+    result
+
+// Executes in MAIN context, with actual closed main bars. Eligibility uses
+// swing confirmation OPEN time exactly as MT5; never backdates a level.
+f_touch(array<Swing> levels, int direction) =>
+    float result = na
+    int count = array.size(levels)
+    if bar_index + 1 >= touchBars and count > 0
+        for i = 0 to touchBars - 1
+            if not f_valid(open[i], high[i], low[i], close[i])
+                break
+            for j = count - 1 to 0
+                Swing e = array.get(levels, j)
+                float price = f_price(e)
+                if e.kind == direction and e.confirmed < time[i] and low[i] <= price and high[i] >= price
+                    result := price
+                    break
+            if not na(result)
+                break
+    result
+
+f_mainInfo() =>
+    var array<Swing> levels = array.new<Swing>()
+    var Trend trend = Trend.new()
+    bool valid = f_valid(open, high, low, close)
+    if not valid
+        array.clear(levels)
+        trend := Trend.new()
+    else
+        Trend nextTrend = f_newTrend(levels, 1)
+        if na(nextTrend)
+            nextTrend := f_newTrend(levels, -1)
+        if not na(nextTrend)
+            trend := nextTrend
+    Swing event = f_swing()
+    if not na(event)
+        if event.kind == trend.direction and event.pivot >= trend.breakTime
+            trend.ready := true
+            trend.pivot := event.pivot
+            trend.pivotPrice := event.price
+            trend.confirmed := event.confirmed
+        f_addLevel(levels, event)
+    float srLow = ta.lowest(low, srHuntBars)
+    float srHigh = ta.highest(high, srHuntBars)
+    float pullLow = ta.lowest(low, pullHuntBars)
+    float pullHigh = ta.highest(high, pullHuntBars)
+    float aLow = ta.lowest(low, anchorHuntBars)
+    float aHigh = ta.highest(high, anchorHuntBars)
+    float validSR = ta.sma(valid ? 1.0 : 0.0, srHuntBars)
+    float validPull = ta.sma(valid ? 1.0 : 0.0, pullHuntBars)
+    float validAnchor = ta.sma(valid ? 1.0 : 0.0, anchorHuntBars)
+    int srFVG = f_fvg(srMinFVG, srMiddleColor)
+    int aFVG = f_fvg(anchorMinFVG, anchorMiddleColor)
+    MainBar bar = MainBar.new(time, bar_index, open, high, low, close, srFVG, aFVG)
+    MainInfo.new(bar, event, srLow, srHigh, pullLow, pullHigh, aLow, aHigh, bar_index + 1 >= contextRequired and validSR == 1.0, validPull == 1.0, validAnchor == 1.0, f_touch(levels, 1), f_touch(levels, -1), trend.direction, trend.ready, trend.sr, trend.pivotPrice, trend.pivot, trend.confirmed)
+
+f_confirmedMain() =>
+    MainInfo info = f_mainInfo()
+    info[1]
+
+// Same first-collision scan, but DIFFERENT pass rules for SR vs Anchor.
+// SR breakout: directional FVG AND colored/body-touch AND head <=30%.
+// Anchor: FVG OR head <10%, no default color/body/direction requirement.
+f_anchor(array<MainBar> bars, float tip, int direction, bool forSR) =>
+    int foundTime = na
+    int pattern = 0
+    float head = na
+    int count = array.size(bars)
+    int search = forSR ? srSearchBars : anchorSearchBars
+    int oldest = search == 0 ? 0 : math.max(0, count - search)
+    if count > 0
+        for i = count - 1 to oldest
+            MainBar b = array.get(bars, i)
+            if not f_valid(b.o, b.h, b.l, b.c)
+                break
+            if b.l <= tip and tip <= b.h
+                float candleRange = b.h - b.l
+                head := candleRange > 0 ? 100 * (direction == 1 ? b.h - math.max(b.o, b.c) : math.min(b.o, b.c) - b.l) / candleRange : na
+                bool bodyOK = math.min(b.o, b.c) <= tip and tip <= math.max(b.o, b.c)
+                bool colorOK = direction == 1 ? b.c > b.o : b.c < b.o
+                bool passed = false
+                if forSR
+                    float leadingWick = direction == 1 ? b.h - b.c : b.c - b.l
+                    passed := b.srFVG == direction and bodyOK and colorOK and candleRange > 0 and leadingWick <= candleRange * (srMaxHead / 100.0)
+                    pattern := passed ? 1 : 0
+                else
+                    bool fvg = b.anchorFVG != 0 and (not anchorFVGDirection or b.anchorFVG == direction)
+                    bool strong = not na(head) and head < anchorMaxHead
+                    bool ruleOK = anchorRule == "FVG OR Strong" ? fvg or strong : fvg and strong
+                    passed := ruleOK and (not anchorBody or bodyOK) and (not anchorColor or colorOK)
+                    pattern := passed ? (fvg ? 1 : 0) + (strong ? 2 : 0) : 0
+                if passed
+                    foundTime := b.opened
+                break
+    [foundTime, pattern, head]
+
+f_context(MainInfo info, array<MainBar> bars, int direction, float tip) =>
+    int pattern = 0
+    float contextSR = na
+    int anchor = na
+    int pivot = na
+    float minHunt = srMinHunt * pointSize
+    bool base = direction == 1 ? tip < info.srLow - minHunt : tip > info.srHigh + minHunt
+    if scenario == "Legacy"
+        pattern := base ? 4 : 0
+    else
+        float touched = direction == 1 ? info.touchBuy : info.touchSell
+        if scenario != "Pullback" and base and not na(touched)
+            [foundTime, anchorPattern, head] = f_anchor(bars, tip, direction, true)
+            if anchorPattern > 0
+                pattern := 1
+                contextSR := touched
+                anchor := foundTime
+        bool sweptPull = direction == 1 ? tip < info.pullLow - minHunt and tip < info.trendPivotPrice : tip > info.pullHigh + minHunt and tip > info.trendPivotPrice
+        if scenario != "Breakout" and info.enoughPull and info.trendReady and info.trendDirection == direction and info.trendConfirmed < time(mainTF) and sweptPull
+            pattern += 2
+            pivot := info.trendPivot
+            if pattern == 2
+                contextSR := info.trendSR
+    [pattern, contextSR, anchor, pivot]
+
+f_srSignal(Setup setup, int direction, int mainOpened, int retestBar) =>
+    Candidate b = setup.candidate
+    Signal.new(1, direction, time_close, mainOpened, setup.pattern == 4 ? 0 : setup.pattern, setup.tip, setup.anchor, na, b.sr, b.srType, b.pivot, b.breakOpened, b.holdClosed, retestBar, setup.reclaimed, setup.contextSR, setup.trendPivot)
+
+// Consume retest BEFORE advancing the current candle. No break/hold wick
+// can be reused as retest. Failure drops the candidate and returns; a later
+// fresh crossing can start another candidate in the same main window.
+f_step(Setup setup, array<Swing> levels, int direction, int mainOpened, int mainEnd, bool eligible) =>
+    Signal event = na
+    if eligible and not setup.sent and not na(setup.reclaimed) and time_close > setup.reclaimed
+        Candidate b = setup.candidate
+        if not na(b) and retestBars > 0 and not na(b.holdClosed)
+            float threshold = b.sr + direction * retestTolerance * pointSize
+            float observed = retestMode == "Close" ? close : direction == 1 ? low : high
+            bool reached = direction == 1 ? observed <= threshold : observed >= threshold
+            if time >= b.holdClosed and time < b.deadline and time_close <= b.deadline and time_close <= mainEnd and reached
+                event := f_srSignal(setup, direction, mainOpened, 1 + int((time - b.holdClosed) / checkMs))
+                setup.sent := true
+        bool mayFind = na(b)
+        if not setup.sent and not na(b)
+            if na(b.holdClosed)
+                int expected = b.breakClosed + b.holds * checkMs
+                if time >= expected
+                    bool held = direction == 1 ? close > b.sr + closeBuffer * pointSize : close < b.sr - closeBuffer * pointSize
+                    if time != expected or not held
+                        setup.candidate := na
+                    else
+                        b.holds += 1
+                        if b.holds >= confirmBars
+                            b.holdClosed := time_close
+                            b.deadline := time_close + retestBars * checkMs
+            else if time >= b.deadline
+                setup.candidate := na
+                mayFind := true
+        if not setup.sent and mayFind and f_valid(open[1], high[1], low[1], close[1])
+            int count = array.size(levels)
+            if count > 0
+                for j = count - 1 to 0
+                    Swing level = array.get(levels, j)
+                    float price = f_price(level)
+                    bool buffered = direction == 1 ? close > price + closeBuffer * pointSize : close < price - closeBuffer * pointSize
+                    if level.confirmed < time and f_cross(direction, close[1], close, price) and buffered
+                        setup.candidate := Candidate.new(price, level.kind, level.pivot, time, time_close)
+                        if retestBars == 0 and time_close < mainEnd
+                            event := f_srSignal(setup, direction, mainOpened, 0)
+                            setup.sent := true
+                        break
+    event
+
+f_reclaim(Setup setup, MainInfo info, array<MainBar> bars, int direction, int mainEnd, float mainOpen, float tip) =>
+    bool returned = direction == 1 ? tip < mainOpen and close >= mainOpen : tip > mainOpen and close <= mainOpen
+    if na(setup.reclaimed) and time_close < mainEnd and returned
+        [pattern, contextSR, anchor, pivot] = f_context(info, bars, direction, tip)
+        if pattern > 0
+            setup.reclaimed := time_close
+            setup.pattern := pattern
+            setup.contextSR := contextSR
+            setup.anchor := anchor
+            setup.trendPivot := pivot
+            setup.tip := tip
+
+f_engine() =>
+    MainInfo info = request.security(syminfo.tickerid, mainTF, f_confirmedMain(), lookahead = barmerge.lookahead_on, calc_bars_count = mainCalcBars)
+    var array<MainBar> bars = array.new<MainBar>()
+    var array<Swing> levels = array.new<Swing>()
+    var int lastPrior = na
+    var int lastIndex = na
+    var int active = na
+    var int previousIndex = na
+    var int firstCheck = time
+    var float mainOpen = na
+    var float runningHigh = na
+    var float runningLow = na
+    var bool complete = false
+    var bool anchorBuySent = false
+    var bool anchorSellSent = false
+    var Setup buySetup = Setup.new()
+    var Setup sellSetup = Setup.new()
+    Swing mainEvent = na
+    if not na(info)
+        MainBar prior = info.candle
+        if na(lastPrior) or prior.opened != lastPrior
+            if not na(lastIndex) and prior.index != lastIndex + 1
+                array.clear(bars)
+            array.push(bars, prior)
+            if array.size(bars) > mainHistory
+                array.shift(bars)
+            lastPrior := prior.opened
+            lastIndex := prior.index
+            mainEvent := info.swing
+    int window = time(mainTF)
+    int mainEnd = time_close(mainTF)
+    // Consecutive SOURCE bars can be separated by market closures or inactivity.
+    // A first-loaded partial main window stays ineligible until the next window.
+    bool consecutive = not na(previousIndex) and bar_index == previousIndex + 1
+    if na(active) or window != active
+        active := window
+        mainOpen := open
+        runningHigh := open
+        runningLow := open
+        complete := time == window or consecutive
+        anchorBuySent := false
+        anchorSellSent := false
+        buySetup := Setup.new()
+        sellSetup := Setup.new()
+    else if not consecutive
+        complete := false
+    bool valid = f_valid(open, high, low, close)
+    if not valid or na(time_close) or time_close <= time or time_close > time + checkMs or time_close > mainEnd
+        complete := false
+    if valid
+        runningHigh := math.max(runningHigh, high)
+        runningLow := math.min(runningLow, low)
+    CheckResult result = CheckResult.new(time_close)
+    result.complete := complete
+    result.firstCheck := firstCheck
+    result.anchors := array.size(bars)
+    result.mainSwing := mainEvent
+    bool srEligible = enableSR and complete and not na(info) and info.enoughSR
+    if enableBuy
+        result.srBuy := f_step(buySetup, levels, 1, window, mainEnd, srEligible)
+    if enableSell
+        result.srSell := f_step(sellSetup, levels, -1, window, mainEnd, srEligible)
+    // Current swing becomes eligible only on a later candle, after f_step.
+    Swing lowerEvent = f_swing()
+    if not valid
+        array.clear(levels)
+        buySetup.candidate := na
+        sellSetup.candidate := na
+    f_addLevel(levels, lowerEvent)
+    result.lowerSwing := lowerEvent
+    // Reclaim observed LAST, so this candle cannot also be its own break.
+    if srEligible
+        if enableBuy
+            f_reclaim(buySetup, info, bars, 1, mainEnd, mainOpen, runningLow)
+        if enableSell
+            f_reclaim(sellSetup, info, bars, -1, mainEnd, mainOpen, runningHigh)
+    if enableAnchor and complete and not na(info) and info.enoughAnchor
+        if enableBuy and not anchorBuySent and close >= mainOpen and runningLow < mainOpen and runningLow < info.anchorLow - anchorMinHunt * pointSize
+            [anchor, pattern, head] = f_anchor(bars, runningLow, 1, false)
+            if pattern > 0
+                result.anchorBuy := Signal.new(2, 1, time_close, window, pattern, runningLow, anchor, head, na, na, na, na, na, 0, time_close, na, na)
+                anchorBuySent := true
+        if enableSell and not anchorSellSent and close <= mainOpen and runningHigh > mainOpen and runningHigh > info.anchorHigh + anchorMinHunt * pointSize
+            [anchor, pattern, head] = f_anchor(bars, runningHigh, -1, false)
+            if pattern > 0
+                result.anchorSell := Signal.new(2, -1, time_close, window, pattern, runningHigh, anchor, head, na, na, na, na, na, 0, time_close, na, na)
+                anchorSellSent := true
+    previousIndex := bar_index
+    result
+
+f_confirmedEngine() =>
+    CheckResult result = f_engine()
+    result[1]
+
+f_time(int timestamp) =>
+    na(timestamp) ? "—" : str.format_time(timestamp, "yyyy-MM-dd HH:mm:ss", syminfo.timezone)
+
+f_pattern(Signal e) =>
+    e.family == 2 ? (e.pattern == 3 ? "FVG + Strong" : e.pattern == 1 ? "FVG" : "Strong") : (e.pattern == 3 ? "Breakout + Pullback" : e.pattern == 2 ? "Pullback" : e.pattern == 1 ? "Breakout" : "Legacy")
+
+f_message(Signal e) =>
+    string name = e.family == 1 ? "SR" : "Anchor"
+    string common = syminfo.ticker + " WickHunt " + name + " " + (e.direction == 1 ? "BUY" : "SELL") + " | " + mainTF + "/" + checkTF + " | " + f_pattern(e) + "\nCheck close: " + f_time(e.closedAt) + "\nMain hunt: " + f_time(e.mainOpened) + " | Tip: " + str.tostring(e.tip, format.mintick)
+    string detail = e.family == 2 ? "\nFirst anchor: " + f_time(e.anchor) + " | Head wick: " + str.tostring(e.head, "#.##") + "%" : "\nReclaim: " + f_time(e.reclaimed) + "\nBreak: " + f_time(e.breakOpened) + " | SR: " + str.tostring(e.sr, format.mintick) + " (Swing " + (e.srType == 1 ? "H" : "L") + ")\nHold close: " + f_time(e.holdClosed) + " | Retest bar: " + str.tostring(e.retestBar) + "\nContext SR: " + str.tostring(e.contextSR, format.mintick) + " | FVG anchor: " + f_time(e.anchor) + " | Trend pivot: " + f_time(e.trendPivot)
+    common + detail
+
+var array<label> markers = array.new<label>()
+var array<line> eventLines = array.new<line>()
+var array<int> markerTimes = array.new<int>()
+var array<int> markerDirections = array.new<int>()
+var array<int> markerFamilies = array.new<int>()
+var array<Swing> lowerDisplay = array.new<Swing>()
+var array<Swing> mainDisplay = array.new<Swing>()
+var array<line> srLines = array.new<line>()
+
+f_draw(Signal e, int chartTime, float chartLow, float chartHigh) =>
+    if visibleSignals > 0
+        while array.size(markers) >= visibleSignals
+            label.delete(array.shift(markers))
+            line oldLine = array.shift(eventLines)
+            if not na(oldLine)
+                line.delete(oldLine)
+            array.shift(markerTimes)
+            array.shift(markerDirections)
+            array.shift(markerFamilies)
+        float gap = (e.family == 1 ? srArrowGap : anchorArrowGap) * pointSize
+        float y = e.direction == 1 ? chartLow - gap : chartHigh + gap
+        string markerStyle = e.family == 1 ? (e.direction == 1 ? label.style_arrowup : label.style_arrowdown) : (e.direction == 1 ? label.style_triangleup : label.style_triangledown)
+        color markerColor = e.family == 1 ? (e.direction == 1 ? srBuyColor : srSellColor) : (e.direction == 1 ? anchorBuyColor : anchorSellColor)
+        label marker = label.new(chartTime, y, e.family == 1 ? "SR" : "A", xloc = xloc.bar_time, yloc = yloc.price, style = markerStyle, color = markerColor, textcolor = color.white, size = markerSize, tooltip = f_message(e))
+        line link = na
+        if e.family == 2 and showAnchorLinks
+            // Anchor event.tip is already its birth-time snapshot; keep that level.
+            link := line.new(e.anchor, e.tip, e.closedAt, e.tip, xloc = xloc.bar_time, color = color.silver, style = line.style_dotted)
+        else if e.family == 1 and showSignalLines
+            link := line.new(e.breakOpened, e.sr, e.closedAt, e.sr, xloc = xloc.bar_time, color = markerColor, style = line.style_solid)
+        array.push(markers, marker)
+        array.push(eventLines, link)
+        array.push(markerTimes, chartTime)
+        array.push(markerDirections, e.direction)
+        array.push(markerFamilies, e.family)
+
+array<CheckResult> results = array.new<CheckResult>()
+bool smallerChart = chartSeconds < checkSeconds
+if chartSeconds > checkSeconds
+    results := request.security_lower_tf(syminfo.tickerid, checkTF, f_engine(), calc_bars_count = checkHistory)
+else if chartSeconds == checkSeconds
+    CheckResult result = f_engine()
+    if barstate.isconfirmed
+        array.push(results, result)
+else
+    CheckResult result = request.security(syminfo.tickerid, checkTF, f_confirmedEngine(), lookahead = barmerge.lookahead_on, calc_bars_count = checkHistory)
+    if timeframe.change(checkTF) and not na(result)
+        array.push(results, result)
+
+// Four independent deduplication keys; varip is used only for live alerts.
+varip int armedAt = timenow
+varip array<int> lastAlert = array.new<int>(4, 0)
+var array<int> counts = array.new<int>(4, 0)
+var CheckResult lastResult = na
+bool srBuySignal = false
+bool srSellSignal = false
+bool anchorBuySignal = false
+bool anchorSellSignal = false
+bool srBuyPulse = false
+bool srSellPulse = false
+bool anchorBuyPulse = false
+bool anchorSellPulse = false
+int targetTime = smallerChart ? time[1] : time
+float targetLow = smallerChart ? low[1] : low
+float targetHigh = smallerChart ? high[1] : high
+int targetEnd = smallerChart ? time_close[1] : time_close
+for r in results
+    bool closed = not na(r.closedAt) and r.closedAt <= timenow
+    bool mapped = not na(targetTime) and r.closedAt > targetTime and r.closedAt <= targetEnd
+    if closed and mapped
+        lastResult := r
+        f_addLevel(lowerDisplay, r.lowerSwing)
+        f_addLevel(mainDisplay, r.mainSwing)
+        array<Signal> events = array.from(r.srBuy, r.srSell, r.anchorBuy, r.anchorSell)
+        for slot = 0 to 3
+            Signal e = array.get(events, slot)
+            if not na(e)
+                array.set(counts, slot, array.get(counts, slot) + 1)
+                f_draw(e, targetTime, targetLow, targetHigh)
+                srBuySignal := srBuySignal or slot == 0
+                srSellSignal := srSellSignal or slot == 1
+                anchorBuySignal := anchorBuySignal or slot == 2
+                anchorSellSignal := anchorSellSignal or slot == 3
+                bool newLive = barstate.isrealtime and e.closedAt >= armedAt and e.closedAt > array.get(lastAlert, slot)
+                if newLive
+                    array.set(lastAlert, slot, e.closedAt)
+                    srBuyPulse := srBuyPulse or slot == 0
+                    srSellPulse := srSellPulse or slot == 1
+                    anchorBuyPulse := anchorBuyPulse or slot == 2
+                    anchorSellPulse := anchorSellPulse or slot == 3
+                    if enableAlerts and (e.family == 1 ? alertSR : alertAnchor)
+                        alert(f_message(e), alert.freq_all)
+
+if array.size(markers) > 0
+    for i = array.size(markers) - 1 to 0
+        if array.get(markerTimes, i) != time
+            break
+        float gap = (array.get(markerFamilies, i) == 1 ? srArrowGap : anchorArrowGap) * pointSize
+        label.set_y(array.get(markers, i), array.get(markerDirections, i) == 1 ? low - gap : high + gap)
+
+// One line per event (<=450) + at most 25 SR lines per TF (<=50).
+// Rebuild latest SR drawings on the last chart bar only; logic is untouched.
+if barstate.islast
+    while array.size(srLines) > 0
+        line.delete(array.pop(srLines))
+    for context = 0 to 1
+        array<Swing> levels = context == 0 ? lowerDisplay : mainDisplay
+        bool enabled = context == 0 ? showLowerSR : showMainSR
+        int count = array.size(levels)
+        if enabled and count > 0
+            int first = math.max(0, count - displaySRCount)
+            for i = first to count - 1
+                Swing e = array.get(levels, i)
+                float price = f_price(e)
+                color col = e.kind == 1 ? (context == 0 ? #FF6347 : color.orange) : (context == 0 ? color.aqua : color.blue)
+                line levelLine = line.new(e.closedAt, price, math.max(time_close, e.closedAt + checkMs), price, xloc = xloc.bar_time, extend = extend.right, color = col, style = context == 0 ? line.style_dotted : line.style_dashed, width = context == 0 ? 1 : 2)
+                array.push(srLines, levelLine)
+
+plot(srBuySignal ? 1 : 0, "SR Buy event", display = display.data_window)
+plot(srSellSignal ? 1 : 0, "SR Sell event", display = display.data_window)
+plot(anchorBuySignal ? 1 : 0, "Anchor Buy event", display = display.data_window)
+plot(anchorSellSignal ? 1 : 0, "Anchor Sell event", display = display.data_window)
+alertcondition(enableAlerts and alertSR and srBuyPulse, "SR BUY", "WickHunt SR BUY on {{ticker}}")
+alertcondition(enableAlerts and alertSR and srSellPulse, "SR SELL", "WickHunt SR SELL on {{ticker}}")
+alertcondition(enableAlerts and alertAnchor and anchorBuyPulse, "Anchor BUY", "WickHunt Anchor BUY on {{ticker}}")
+alertcondition(enableAlerts and alertAnchor and anchorSellPulse, "Anchor SELL", "WickHunt Anchor SELL on {{ticker}}")
+var table status = table.new(position.bottom_left, 1, 4, bgcolor = color.new(color.black, 20))
+if barstate.islast and showStatus
+    table.cell(status, 0, 0, "WickHunt SR + Anchor 1.02 | " + mainTF + "/" + checkTF + " | check close", text_color = color.white, text_size = size.small)
+    table.cell(status, 0, 1, "SR: arrow SR | Buy " + str.tostring(array.get(counts, 0)) + " / Sell " + str.tostring(array.get(counts, 1)), text_color = srBuyColor, text_size = size.small)
+    table.cell(status, 0, 2, "Anchor: triangle A | Buy " + str.tostring(array.get(counts, 2)) + " / Sell " + str.tostring(array.get(counts, 3)), text_color = anchorBuyColor, text_size = size.small)
+    string coverage = na(lastResult) ? "Waiting for check-TF history" : "History from " + f_time(lastResult.firstCheck) + " | anchors " + str.tostring(lastResult.anchors) + " | " + (lastResult.complete ? "Complete main window" : "Partial / missing check bars: wait")
+    table.cell(status, 0, 3, coverage, text_color = color.silver, text_size = size.tiny)

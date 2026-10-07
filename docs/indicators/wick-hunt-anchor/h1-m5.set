@@ -1,0 +1,16 @@
+; WickHuntAnchor 1.12: H1 hunt/anchor, check every completed M5 candle
+InpHuntTF=16385
+InpCheckTF=5
+InpObservationMode=2
+InpCheckHistoryBars=0
+InpAnchorRule=0
+InpStrongHeadWickPercent=30
+InpRequireAnchorColor=false
+InpRequireBodyTouch=false
+InpRequireFVGDirection=false
+InpVisibleSignals=5000
+InpArrowWidth=1
+InpArrowGapPoints=200
+InpRequireBuyAnchorGreen=true
+InpRequireSellAnchorRed=true
+InpSearchBars=36

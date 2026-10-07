@@ -1,0 +1,24 @@
+//@version=6
+indicator("MT5 MACD parity fixture", overlay=false, precision=10)
+// Paste in Pine Editor. This is a verification aid, not the MT5 indicator.
+// Fixture = tests/tv-style-macd/macd_tests.cpp; use the same bar_index on both sides.
+synthetic = input.bool(true, "Synthetic fixture (independent of broker feed)")
+fastLength = input.int(12, "Fast", minval=1)
+slowLength = input.int(26, "Slow", minval=1)
+signalLength = input.int(9, "Signal", minval=1)
+oscSMA = input.bool(false, "SMA oscillator")
+sigSMA = input.bool(false, "SMA signal")
+src = synthetic ? 100 + 10 * math.sin(bar_index * 0.13) + bar_index * 0.01 : close
+fast = oscSMA ? ta.sma(src, fastLength) : ta.ema(src, fastLength)
+slow = oscSMA ? ta.sma(src, slowLength) : ta.ema(src, slowLength)
+macd = fast - slow
+signal = sigSMA ? ta.sma(macd, signalLength) : ta.ema(macd, signalLength)
+hist = macd - signal
+palette = hist >= 0 ? (hist[1] < hist ? 0 : 1) : (hist[1] < hist ? 2 : 3)
+plot(bar_index, "Fixture index", display=display.data_window)
+plot(src, "Fixture source", display=display.data_window)
+plot(macd, "MACD", color=#2962FF)
+plot(signal, "Signal", color=#FF6D00)
+plot(hist, "Histogram", color=palette == 0 ? #26A69A : palette == 1 ? #B2DFDB : palette == 2 ? #FFCDD2 : #FF5252, style=plot.style_columns)
+plot(palette, "Color index", display=display.data_window)
+hline(0, "Zero", color=#787B86)

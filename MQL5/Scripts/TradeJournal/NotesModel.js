@@ -1,0 +1,23 @@
+/* Personal notes have their own account/server/position identity, never ledger fields. */
+(function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory();else root.JournalNotes=factory();})(typeof globalThis!=='undefined'?globalThis:this,function(){
+'use strict';
+const fields=['status','setup','tags','confidence','moodBefore','moodDuring','moodAfter','before','during','after','lessons','nextTime'];
+const defaults=['ตรงตามเงื่อนไข setup ที่วางไว้','กำหนดจุดเข้า / SL / TP ก่อนเข้า','ขนาด lot และความเสี่ยงอยู่ในแผน','ตรวจบริบทตลาดและข่าวตามแผน'];
+const prefix='trade-journal.notes.v1:';
+function identity(account,server,position,demo){return {account,server,position,demo:!!demo};}
+function key(i){if(!i||typeof i.account!=='string'||!/^\d{1,20}$/.test(i.account)||typeof i.server!=='string'||!i.server||i.server.length>500||typeof i.position!=='string'||!/^\d{1,20}$/.test(i.position)||typeof i.demo!=='boolean')throw Error('บัญชี / server / position ในบันทึกไม่ถูกต้อง');return JSON.stringify([i.demo,i.account,i.server,i.position]);}
+function blank(i){key(i);return {identity:{...i},updatedAt:'',fields:Object.fromEntries(fields.map(f=>[f,f==='status'?'todo':''])),checklist:defaults.map(label=>({label,checked:false}))};}
+function normalize(r){key(r?.identity);if(typeof r.updatedAt!=='string'||!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(r.updatedAt)||!Number.isFinite(Date.parse(r.updatedAt)))throw Error('เวลาของบันทึกไม่ถูกต้อง');const out=blank(r.identity);out.updatedAt=r.updatedAt;if(!r.fields||typeof r.fields!=='object')throw Error('รายละเอียดบันทึกไม่ถูกต้อง');for(const f of fields){if(typeof r.fields[f]!=='string'||r.fields[f].length>30000)throw Error('ช่องบันทึกไม่ถูกต้องหรือยาวเกิน 30,000 ตัวอักษร');out.fields[f]=r.fields[f];}if(!['todo','reviewing','reviewed'].includes(out.fields.status)||!['','1','2','3','4','5'].includes(out.fields.confidence))throw Error('สถานะหรือระดับความมั่นใจไม่ถูกต้อง');if(!Array.isArray(r.checklist)||r.checklist.length>100)throw Error('เช็กลิสต์ต้องไม่เกิน 100 ข้อ');out.checklist=r.checklist.map(c=>{if(!c||typeof c.label!=='string'||c.label.length>500||typeof c.checked!=='boolean')throw Error('ข้อเช็กลิสต์ไม่ถูกต้อง');return {label:c.label,checked:c.checked};});return out;}
+function parseBundle(value){if(typeof value==='string'){if(value.length>10000000)throw Error('ไฟล์บันทึกใหญ่เกิน 10 MB');value=JSON.parse(value);}if(!value||value.kind!=='TradeJournalNotes'||value.version!==1||!Array.isArray(value.records)||value.records.length>10000)throw Error('รูปแบบไฟล์บันทึกไม่รองรับ');const seen=new Set();return value.records.map(r=>{const n=normalize(r),k=key(n.identity);if(seen.has(k))throw Error('มีบันทึก position ซ้ำในไฟล์');seen.add(k);return n;});}
+function bundle(records){return {kind:'TradeJournalNotes',version:1,records:records.map(normalize)};}
+function create(storage,embedded=[]){const cache=new Map(),seeds=new Map(embedded.map(r=>{const n=normalize(r);return [key(n.identity),n];}));
+ function slot(i){const k=key(i);if(cache.has(k))return cache.get(k);let raw=null,record=null,error='',blocked=false;try{if(!storage)throw Error('browser ไม่อนุญาต local storage');raw=storage.getItem(prefix+k);if(raw!==null){record=normalize(JSON.parse(raw));if(key(record.identity)!==k)throw Error('รหัสบันทึกใน storage ไม่ตรงกัน');}}catch(e){error=e.message;blocked=true;}const seed=seeds.get(k);if(seed&&(!record||seed.updatedAt>record.updatedAt))record=seed;const s={raw,record,blocked,error,dirty:false};cache.set(k,s);return s;}
+ function get(i){return slot(i).record||blank(i);}
+ function persist(s,k,r){s.record=r;try{if(s.blocked)throw Error(s.error);if(storage.getItem(prefix+k)!==s.raw)throw Error('บันทึกถูกแก้จากหน้าต่างอื่น กรุณาสำรองฉบับนี้ก่อนเปิดหน้ารายงานใหม่');const raw=JSON.stringify(r);storage.setItem(prefix+k,raw);s.raw=raw;s.dirty=false;s.error='';return {saved:true,record:r};}catch(e){s.dirty=true;s.error=e.message;return {saved:false,record:r,error:e.message};}}
+ function save(i,values,checklist){const s=slot(i),r=normalize({identity:i,updatedAt:new Date().toISOString(),fields:values,checklist});return persist(s,key(i),r);}
+ function importRecords(records,replace=false){let added=0,skipped=0,failed=0;const valid=records.map(normalize);for(const r of valid){const s=slot(r.identity);if(s.record&&!replace){skipped++;continue;}const result=persist(s,key(r.identity),r);added++;if(!result.saved)failed++;}return {added,skipped,failed};}
+ function records(identities){return identities.map(i=>slot(i).record).filter(Boolean);}
+ return {get,save,importRecords,records,state:i=>slot(i),dirty:()=>[...cache.values()].some(s=>s.dirty)};
+}
+return {fields,defaults,prefix,identity,key,blank,normalize,parseBundle,bundle,create};
+});

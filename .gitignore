@@ -6,3 +6,15 @@ __pycache__/
 .env
 .env.*
 !.env.example
+
+# Generated backtest data, reports, and charts (keep replay scripts and notes).
+tests/reports/**/*.csv
+tests/reports/**/*.csv.gz
+tests/reports/**/*.json
+tests/reports/**/*.png
+tests/reports/**/*.jpg
+tests/reports/**/*.jpeg
+tests/reports/**/*.svg
+tests/reports/**/*.pdf
+tests/reports/**/*.html
+tests/reports/**/*.zip

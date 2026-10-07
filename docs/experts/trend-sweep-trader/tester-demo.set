@@ -1,0 +1,36 @@
+; TrendSweepTrader 1.00 - Strategy Tester / demo only
+; Execute enabled; current Equity risk 1%; research defaults, not optimized.
+InpFastEMA=50
+InpSlowEMA=200
+InpATRLength=14
+InpSweepLookback=8
+InpRoomLookback=40
+InpCooldownBars=6
+InpTradeSide=0
+InpMinSweepATR=0.05
+InpMaxSweepATR=0.80
+InpMinBodyRatio=0.35
+InpMinCloseLocation=0.65
+InpMaxExtensionATR=2.0
+InpSLBufferATR=0.10
+InpSLBufferPoints=0
+InpMinStopATR=0.5
+InpMaxStopATR=2.5
+InpTargetRR=2.0
+InpRoomBufferATR=0.10
+InpHistoryBars=3000
+InpStartHour=0
+InpEndHour=0
+InpExecuteTrades=true
+InpRiskPercent=1.0
+InpMaxRiskPercent=2.0
+InpMinRR=1.8
+InpCommissionPerLot=0
+InpMagicNumber=26091902
+InpDeviationPoints=20
+InpMaxSpreadPoints=50
+InpMaxSpreadATR=0.10
+InpMaxEntryDriftATR=0.20
+InpMaxQuoteAgeSeconds=5
+InpSignalMaxDelaySeconds=10
+InpFreezeGuard=true

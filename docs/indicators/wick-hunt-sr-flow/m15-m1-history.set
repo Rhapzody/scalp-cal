@@ -1,0 +1,7 @@
+; WickHuntSRFlow 1.06: M15 hunt / M1 closed-candle history
+; Other signal rules are not overridden by this preset.
+InpHuntTF=15
+InpSignalTF=1
+InpObservationMode=1
+InpClosedRetest=0
+InpVisibleSignals=5000

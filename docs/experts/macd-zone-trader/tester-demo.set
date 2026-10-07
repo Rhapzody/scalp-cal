@@ -1,0 +1,36 @@
+; MACDZoneTrader 1.10 - Strategy Tester / demo preset
+; Enables order execution. Risk is 1% of current Equity per signal.
+InpExecuteTrades=true
+InpRiskPercent=1.0
+InpMaxRiskPercent=2.0
+InpMinRR=1.0
+InpSLBufferPoints=0
+InpCommissionPerLot=0
+InpMagicNumber=26091801
+InpDeviationPoints=20
+InpMaxSpreadPoints=50
+InpMaxQuoteAgeSeconds=5
+InpSignalMaxDelaySeconds=10
+InpFreezeGuard=true
+InpFastEMA=12
+InpSlowEMA=26
+InpSignalEMA=9
+InpWarmupBars=0
+InpZoneMode=0
+InpHistoryM5Bars=1500
+InpZoneLifeBars=144
+InpStrength=0
+InpATRLength=14
+InpMaxLegBars=30
+InpMinLegATR=1.0
+InpMinFVGATR=0.10
+InpMinEfficiency=0.65
+InpMinBreakBodyRatio=0.50
+InpConfirmationBars=30
+InpTradeSide=0
+InpM5BreakBufferPoints=0
+InpM1BreakBufferPoints=0
+InpTouchMode=0
+InpInvalidationMode=0
+InpMaxCloseTailRatio=0.25
+InpTPBufferPoints=0

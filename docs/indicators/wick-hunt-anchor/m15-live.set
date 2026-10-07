@@ -1,0 +1,11 @@
+; WickHuntAnchor 1.00: live M15 hunt/open, no lower timeframe
+InpHuntTF=15
+InpObservationMode=0
+InpAnchorRule=0
+InpStrongHeadWickPercent=10
+InpRequireAnchorColor=false
+InpRequireBodyTouch=false
+InpRequireFVGDirection=false
+InpRequireBuyAnchorGreen=true
+InpRequireSellAnchorRed=true
+InpSearchBars=36
