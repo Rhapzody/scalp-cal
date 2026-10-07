@@ -70,6 +70,20 @@ public:
 };
 int WAPY(const double price,const double bottom,const double span,const int top,const int height)
 { return top+height-(int)MathRound((price-bottom)/span*height); }
+bool WAPText(CWAPCanvas &canvas,const int x,const int y,const string text,
+             const int available,const int size,const uint ink,const bool bold=false)
+{
+   // Positive sizes are image pixels, independent of the Wine/Windows DPI.
+   if(!canvas.FontSet("Arial",size,bold ? FW_SEMIBOLD : FW_NORMAL)) return false;
+   string fitted=text;
+   if((int)canvas.TextWidth(fitted)>available)
+   {
+      while(StringLen(fitted)>0 && (int)canvas.TextWidth(fitted+"...")>available)
+         fitted=StringSubstr(fitted,0,StringLen(fitted)-1);
+      fitted+="...";
+   }
+   canvas.TextOut(x,y,fitted,ink); return true;
+}
 bool WAPRender(const WATRecord &e,const ENUM_TIMEFRAMES tf,const string path,const int requested)
 {
    MqlRates rates[]; ArraySetAsSeries(rates,false);
@@ -78,9 +92,34 @@ bool WAPRender(const WATRecord &e,const ENUM_TIMEFRAMES tf,const string path,con
    if(n<2) return false;
    CWAPCanvas canvas;
    if(!canvas.Create("WHA_memory_"+(string)GetMicrosecondCount(),InpPictureWidth,InpPictureHeight)) return false;
-   canvas.Erase(ColorToARGB(clrBlack));
-   if(!canvas.FontSet("Arial",-140)) return false;
-   int left=45,top=100,width=InpPictureWidth-155,height=InpPictureHeight-160;
+   uint background=0xff101d27,panel=0xff162631,grid=0xff2b3d49;
+   uint muted=0xffb1c3d0,white=0xffeef4f8,gold=0xffe3bd59;
+   uint direction_ink=ColorToARGB(e.direction==1 ? InpBuyColor : InpSellColor);
+   canvas.Erase(background);
+   double scale=MathMin((double)InpPictureWidth/1280.0,(double)InpPictureHeight/720.0);
+   int margin=(int)MathRound(28*scale),title_size=(int)MathMax(24,48*scale);
+   int text_size=(int)MathMax(18,34*scale),axis_size=(int)MathMax(16,32*scale);
+   int small_size=(int)MathMax(16,28*scale),line_height=text_size+10;
+   string id=RecordKey(e),side=e.direction==1 ? "BUY" : "SELL";
+   bool main=tf==g_hunt_tf;
+   canvas.FillRectangle(0,0,InpPictureWidth-1,margin+title_size+line_height*2,panel);
+   int tag_width=(int)MathRound(200*scale);
+   if(!WAPText(canvas,margin,margin,_Symbol+" · "+TFText(tf),
+               InpPictureWidth-margin*2-tag_width,title_size,white,true)) return false;
+   WAPText(canvas,InpPictureWidth-margin-tag_width,margin,main ? "MAIN TF" : "CHECK TF",
+           tag_width,text_size,muted);
+   int row=margin+title_size+12;
+   WAPText(canvas,margin,row,side+" · "+TimeToString((datetime)e.time,TIME_DATE|TIME_SECONDS)+
+           " broker · #"+WAFShortID(id),InpPictureWidth-margin*2,text_size,direction_ink,true);
+   row+=line_height;
+   WAPText(canvas,margin,row,PatternText(e.pattern)+" · Signal price "+WAFPrice(e.price,_Digits)+
+           " · Wick tip "+WAFPrice(e.tip,_Digits),InpPictureWidth-margin*2,text_size,muted);
+   if(!canvas.FontSet("Arial",axis_size)) return false;
+   int price_width=(int)canvas.TextWidth(DoubleToString(e.tip,_Digits));
+   int left=margin,top=row+line_height+margin;
+   int width=InpPictureWidth-left-margin-(int)MathMax(110*scale,price_width+margin);
+   int height=InpPictureHeight-top-margin-small_size*3-30;
+   if(width<100 || height<50) return false;
    double low=rates[0].low,high=rates[0].high;
    for(int i=0;i<n;i++)
    {
@@ -92,14 +131,17 @@ bool WAPRender(const WATRecord &e,const ENUM_TIMEFRAMES tf,const string path,con
    double range=high-low;
    if(range<=0) return false;
    low-=range*0.12; high+=range*0.12; range=high-low;
-   double step=(double)width/(n+5);
-   int body=(int)MathMax(1,MathMin(12,step*0.32));
-   uint gray=ColorToARGB(clrDimGray),silver=ColorToARGB(clrSilver),white=ColorToARGB(clrWhite),gold=ColorToARGB(clrGold);
-   for(int k=0;k<=5;k++)
+   double step=(double)width/(n+3);
+   int body=(int)MathMax(1,MathMin(14*scale,step*0.30));
+   int tip_y=WAPY(e.tip,low,range,top,height);
+   for(int k=0;k<=2;k++)
    {
-      double price=low+range*k/5.0; int y=WAPY(price,low,range,top,height);
-      canvas.LineHorizontal(left,left+width,y,gray);
-      canvas.TextOut(left+width+8,y-8,DoubleToString(price,_Digits),silver);
+      double price=low+range*k/2.0; int y=WAPY(price,low,range,top,height);
+      canvas.LineHorizontal(left,left+width,y,grid);
+      // Keep the frozen wick price readable if it sits near a grid label.
+      if(!InpShowAnchorLinks || MathAbs(y-tip_y)>axis_size+8)
+         WAPText(canvas,left+width+10,y-axis_size/2,DoubleToString(price,_Digits),
+                 InpPictureWidth-left-width-margin-10,axis_size,muted);
    }
    int confirm=-1,anchor=-1,signal_x=-1;
    int tf_seconds=PeriodSeconds(tf);
@@ -119,14 +161,30 @@ bool WAPRender(const WATRecord &e,const ENUM_TIMEFRAMES tf,const string path,con
       if(e.time>=(long)b.time && (e.time<(long)b.time+tf_seconds ||
          (i==n-1 && e.time==(long)b.time+tf_seconds)))
          signal_x=left+(int)MathRound((i+0.5+(double)(e.time-(long)b.time)/tf_seconds)*step);
-      if(i%((int)MathMax(1,n/6))==0)
-         canvas.TextOut(x-18,top+height+10,TimeToString(b.time,TIME_DATE|TIME_MINUTES),silver);
    }
-   int tip_y=WAPY(e.tip,low,range,top,height);
+   // Three compact date/time ticks; measure each label and keep it in bounds.
+   if(!canvas.FontSet("Arial",small_size)) return false;
+   for(int k=0;k<3;k++)
+   {
+      int i=(int)MathRound((n-1)*k/2.0);
+      string label=TimeToString(rates[i].time,TIME_DATE|TIME_MINUTES);
+      label=StringSubstr(label,5); // MM.DD HH:MM, broker date across sessions
+      int x=left+(int)MathRound((i+0.5)*step),label_width=(int)canvas.TextWidth(label);
+      if(k==1 && (n<3 || width<label_width*3+margin*2)) continue;
+      x=(int)MathMax(left,MathMin(left+width-label_width,x-label_width/2));
+      canvas.TextOut(x,top+height+12,label,muted);
+   }
    int from=anchor>=0 ? left+(int)MathRound((anchor+0.5)*step) : left;
    int to=signal_x>=0 ? signal_x : left+width;
-   if(InpShowAnchorLinks) canvas.LineHorizontal(from,to,tip_y,ColorToARGB(InpAnchorColor));
-   canvas.TextOut(left,75,"Wick tip at signal "+DoubleToString(e.tip,_Digits)+" | Anchor "+TimeToString((datetime)e.anchor,TIME_DATE|TIME_MINUTES),silver);
+   if(InpShowAnchorLinks)
+   {
+      uint link=ColorToARGB(InpAnchorColor);
+      int dash=(int)MathMax(4,12*scale),gap=(int)MathMax(3,8*scale);
+      for(int x=from;x<=to;x+=dash+gap)
+         canvas.LineHorizontal(x,(int)MathMin(to,x+dash),tip_y,link);
+      WAPText(canvas,left+width+10,tip_y-axis_size/2,DoubleToString(e.tip,_Digits),
+              InpPictureWidth-left-width-margin-10,axis_size,white,true);
+   }
    if(anchor>=0 && tf==g_hunt_tf)
    {
       int x=left+(int)MathRound((anchor+0.5)*step);
@@ -136,18 +194,22 @@ bool WAPRender(const WATRecord &e,const ENUM_TIMEFRAMES tf,const string path,con
    if(confirm>=0)
    {
       int x=left+(int)MathRound((confirm+0.5)*step);
-      canvas.LineVertical(x,top,top+height,gold);
       int y=WAPY(e.direction==1 ? rates[confirm].low : rates[confirm].high,low,range,top,height);
       int sign=e.direction==1 ? 1 : -1;
-      y+=sign*18;
-      uint ink=ColorToARGB(e.direction==1 ? InpBuyColor : InpSellColor);
-      canvas.FillTriangle(x,y-sign*6,x-6,y+sign*5,x+6,y+sign*5,ink);
-      canvas.LineVertical(x,y+sign*5,y+sign*14,ink);
+      int arrow=(int)MathMax(6,12*scale);
+      y+=sign*(arrow+8);
+      canvas.FillTriangle(x,y-sign*arrow,x-arrow,y+sign*arrow/2,x+arrow,y+sign*arrow/2,direction_ink);
+      canvas.LineVertical(x,y+sign*arrow/2,y+sign*arrow*2,direction_ink);
    }
-   canvas.TextOut(15,15,"WickHuntAnchor | "+_Symbol+" "+TFText(tf)+" | "+(e.direction==1 ? "BUY" : "SELL")+" | "+PatternText(e.pattern),white);
-   canvas.TextOut(15,42,"Signal (broker) "+TimeToString((datetime)e.time,TIME_DATE|TIME_SECONDS)+
-                  " | Image data captured "+TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS),silver);
-   canvas.TextOut(15,InpPictureHeight-25,"Gold line = confirmation candle | Gold box = main-TF anchor | Link frozen at signal wick | Current candle included",silver);
+   string legend=main ? "Gold box: Anchor "+TimeToString((datetime)e.anchor,TIME_DATE|TIME_MINUTES) :
+      (e.observation==WHA_LOWER_TF_CLOSE ? "Arrow: checked at "+TFText(InpCheckTF)+" close" :
+       (e.observation==WHA_CLOSED_CANDLE ? "Arrow: checked at main-TF close" : "Arrow: live-tick check"));
+   if(confirm<0) legend="Signal candle is outside this picture range";
+   WAPText(canvas,margin,InpPictureHeight-margin-small_size*2-14,legend,
+           InpPictureWidth-margin*2,small_size,muted);
+   WAPText(canvas,margin,InpPictureHeight-margin-small_size,"Captured "+
+           TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS)+" broker · Current candle included",
+           InpPictureWidth-margin*2,small_size,muted);
    return canvas.SavePNG(path);
 }
 #endif

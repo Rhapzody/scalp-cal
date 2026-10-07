@@ -1,9 +1,10 @@
 ﻿#property copyright "MT5 Trading Tools"
-#property version "1.06"
+#property version "1.07"
 #property strict
 #property description "WickHuntAnchor 1.12 alerts, chart arrows and text first, then two-TF Telegram pictures. Never opens orders."
 #include "AnchorRuntime.mqh"
 #include "AnchorTelegramQueue.mqh"
+#include "AnchorPresentation.mqh"
 
 input group "Telegram outbox - separate sender handles the network"
 input bool InpTelegramEnabled=true; // InpTelegramEnabled | บันทึกสัญญาณส่ง Telegram
@@ -77,7 +78,7 @@ int OnInit()
    g_instance_lock=FileOpen(g_folder+"\\"+g_instance+".lock",FILE_READ|FILE_WRITE|FILE_BIN);
    if(g_instance_lock==INVALID_HANDLE)
    { Print("WickHuntAnchor EA: duplicate detector or unwritable queue. Use a unique InstanceID for an intentional extra instance."); return INIT_FAILED; }
-   Print("WickHuntAnchor EA 1.06 | queue=",InpQueueChannel," | instance=",g_instance,
+   Print("WickHuntAnchor EA 1.07 | queue=",InpQueueChannel," | instance=",g_instance,
          " | files=",TerminalInfoString(TERMINAL_DATA_PATH),"\\MQL5\\Files\\",g_folder);
    g_watermark=(long)TimeCurrent();
    int f=FileOpen(g_folder+"\\"+g_instance+".checkpoint",FILE_READ|FILE_BIN);
@@ -144,18 +145,25 @@ WATRecord SignalRecord(const WHAEvent &e)
    r.queued=(long)TimeLocal(); r.time=e.time; r.setup=e.setup_time; r.anchor=e.anchor_time;
    r.price=e.price; r.tip=e.signal_tip; r.head=e.head_wick_percent; r.direction=e.direction;
    r.pattern=e.pattern; r.observation=e.observation; r.kind=1; r.instance=g_instance;
-   string when=TimeToString((datetime)e.time,TIME_DATE|TIME_SECONDS);
-   string confirm=e.observation==WHA_LOWER_TF_CLOSE ? TFText(InpCheckTF)+" close" :
-                  (e.observation==WHA_CLOSED_CANDLE ? TFText(g_hunt_tf)+" close" : "live tick");
-   r.message="WickHuntAnchor "+(e.direction==1 ? "BUY" : "SELL")+" | "+_Symbol+"\n"+
-      TFText(g_hunt_tf)+" / "+TFText(InpCheckTF)+" | "+PatternText(e.pattern)+" | "+confirm+"\n"+
-      "Time (broker): "+when+"\nPrice: "+DoubleToString(e.price,_Digits)+" | Wick at signal: "+DoubleToString(e.signal_tip,_Digits)+
-      "\nHunt: "+TimeToString((datetime)e.setup_time,TIME_DATE|TIME_MINUTES)+
-      "\nAnchor: "+TimeToString((datetime)e.anchor_time,TIME_DATE|TIME_MINUTES)+
-      " | head "+DoubleToString(e.head_wick_percent,2)+"%\n"+
-      (e.observation==WHA_CLOSED_CANDLE || e.time>=e.setup_time+g_hunt_seconds ? "Main candle closed" : "Main candle forming: signal may be cancelled")+
-      "\nID: "+RecordKey(r);
-   if((long)TimeCurrent()-e.time>60) r.message="[RECOVERED DELAYED SIGNAL - check broker time]\n"+r.message;
+   string confirm=e.observation==WHA_LOWER_TF_CLOSE ? "ตรวจเมื่อ "+TFText(InpCheckTF)+" ปิด" :
+                  (e.observation==WHA_CLOSED_CANDLE ? "ตรวจเมื่อ "+TFText(g_hunt_tf)+" ปิด" : "ตรวจจากราคาวิ่ง (tick)");
+   bool closed=e.observation==WHA_CLOSED_CANDLE || e.time>=e.setup_time+g_hunt_seconds;
+   r.message=WAF_HTML_PREFIX+"<b>"+(e.direction==1 ? "🟢 BUY" : "🔴 SELL")+" · "+WAFEscape(_Symbol)+"</b>\n"+
+      "WickHunt Anchor · "+TFText(g_hunt_tf)+" → "+TFText(InpCheckTF)+"\n\n"+
+      "<b>ราคาเมื่อแจ้ง</b>\n<b>"+WAFPrice(e.price,_Digits)+"</b>\n"+
+      "ปลายหางตอนเกิดสัญญาณ · "+WAFPrice(e.signal_tip,_Digits)+"\n\n"+
+      "<b>การตรวจสัญญาณ</b>\n"+confirm+" · "+TimeToString((datetime)e.time,TIME_SECONDS)+"\n"+
+      "แท่ง "+TFText(g_hunt_tf)+" เริ่ม · "+TimeToString((datetime)e.setup_time,TIME_DATE|TIME_MINUTES)+"\n\n"+
+      "<b>"+PatternText(e.pattern)+"</b>\n"+
+      "แท่ง Anchor · "+TimeToString((datetime)e.anchor_time,TIME_DATE|TIME_MINUTES);
+   // This percentage describes Strong only; it never filters the FVG branch.
+   if((e.pattern&2)!=0) r.message+="\nหางหัว Strong · "+DoubleToString(e.head_wick_percent,2)+"%";
+   r.message+="\n\n"+(closed ? "✅ แท่ง "+TFText(g_hunt_tf)+" ปิดแล้ว" :
+      "⚠️ แท่ง "+TFText(g_hunt_tf)+" ยังไม่ปิด สัญญาณอาจถูกยกเลิก")+
+      "\n\n"+TimeToString((datetime)e.time,TIME_DATE)+" · เวลาโบรกเกอร์\n"+
+      "<code>#"+WAFShortID(RecordKey(r))+"</code>";
+   if((long)TimeCurrent()-e.time>60)
+      r.message+="\n⚠️ กู้สัญญาณที่ค้างไว้ โปรดตรวจเวลาโบรกเกอร์";
    if(InpSendPictures)
    {
       string stem="WHAshots\\"+g_account+"_"+StringSubstr(WATHash(InpQueueChannel+"|"+RecordKey(r)),0,24);
@@ -183,9 +191,11 @@ bool ProcessSignals()
          if(InpNotifyCancellation)
          {
             WATRecord c=r; c.queued=(long)TimeLocal(); c.kind=2; c.main_photo=""; c.lower_photo=""; c.parent=id;
-            c.message="CANCELLED | WickHuntAnchor "+(r.direction==1 ? "BUY" : "SELL")+" | "+_Symbol+
-               "\nThe wick extended: the current first anchor no longer confirms the original signal."+
-               "\nHunt (broker): "+TimeToString((datetime)r.setup,TIME_DATE|TIME_MINUTES)+"\nOriginal ID: "+id;
+            c.message=WAF_HTML_PREFIX+"<b>❌ ยกเลิก · "+(r.direction==1 ? "BUY" : "SELL")+" · "+WAFEscape(_Symbol)+"</b>\n"+
+               "WickHunt Anchor · "+TFText(g_hunt_tf)+" → "+TFText(InpCheckTF)+"\n\n"+
+               "หางยืดจนแท่ง Anchor แรกไม่ผ่านเงื่อนไขของสัญญาณเดิม\n"+
+               "แท่ง Hunt · "+TimeToString((datetime)r.setup,TIME_DATE|TIME_MINUTES)+" · เวลาโบรกเกอร์\n"+
+               "สัญญาณเดิม <code>#"+WAFShortID(id)+"</code>";
             if(!WATPublish(g_folder,WATHash(id+"|cancel"),c)) return false;
          }
       }

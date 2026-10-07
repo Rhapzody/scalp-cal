@@ -1,8 +1,9 @@
 ﻿#property copyright "MT5 Trading Tools"
-#property version "1.06"
+#property version "1.07"
 #property strict
 #property description "One Telegram sender per terminal/account/channel. Text first, then pictures from WickHuntAnchorTelegramEA outbox; never trades."
 #include "AnchorTelegramQueue.mqh"
+#include "AnchorPresentation.mqh"
 
 input group "Telegram"
 input string InpBotToken=""; // InpBotToken | Token บอท เก็บไว้เฉพาะ Sender
@@ -189,7 +190,7 @@ bool AlbumRequest(const string chat,const string message,const string first,cons
 {
    ArrayResize(out,0);
    string media="[{\"type\":\"photo\",\"media\":\"attach://main\",\"caption\":"+WATJson(message)+
-                "},{\"type\":\"photo\",\"media\":\"attach://lower\"}]";
+                ",\"parse_mode\":\"HTML\"},{\"type\":\"photo\",\"media\":\"attach://lower\"}]";
    string part="--"+boundary+"\r\nContent-Disposition: form-data; name=\"";
    if(!AppendText(out,part+"chat_id\"\r\n\r\n"+chat+"\r\n"+
                       part+"media\"\r\n\r\n"+media+"\r\n")) return false;
@@ -210,12 +211,12 @@ void OnTimer()
    string id=StringSubstr(name,0,StringLen(name)-8);
    if(phase==WAT_SKIP_CANCELLED)
    { CompleteEvent(name,event); return; }
-   string message=event.message;
+   string message=WAFMessageHTML(event.message);
    if(phase==WAT_TEXT && InpLateAfterSeconds>0 && (long)TimeLocal()-event.queued>InpLateAfterSeconds)
-      message="[DELAYED ALERT - check event time]\n"+message;
-   if(phase==WAT_ALBUM) message="[Pictures for signal already sent]\n"+message;
+      message="⚠️ <b>แจ้งเตือนล่าช้า โปรดตรวจเวลาสัญญาณ</b>\n\n"+message;
+   if(phase==WAT_ALBUM) message=WAFAlbumCaption(event,id);
    if(phase==WAT_NO_PICTURES)
-      message="[Pictures unavailable — original signal text was already sent]\nID: "+id;
+      message="📷 <b>รูปยังไม่พร้อม</b>\nข้อความสัญญาณส่งแล้ว โปรดเปิดกราฟตรวจสอบ\n<code>#"+WAFShortID(id)+"</code>";
    char data[],response[];
    string method="sendMessage",request_headers="Content-Type: application/json\r\n";
    if(phase==WAT_ALBUM)
@@ -227,7 +228,7 @@ void OnTimer()
    }
    else
    {
-      string body="{\"chat_id\":"+WATJson(InpChatID)+",\"text\":"+WATJson(message)+"}";
+      string body="{\"chat_id\":"+WATJson(InpChatID)+",\"text\":"+WATJson(message)+",\"parse_mode\":\"HTML\"}";
       int n=StringToCharArray(body,data,0,WHOLE_ARRAY,CP_UTF8)-1;
       if(n<1 || ArrayResize(data,n)!=n) { SenderStatus("Cannot allocate Telegram request; retrying"); return; }
    }

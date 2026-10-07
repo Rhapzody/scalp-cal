@@ -1,3 +1,15 @@
+# Verification status — 1.07
+
+วันที่ 2026-10-07 ผู้ใช้ยืนยันว่า 1.06 ส่งข้อความ/รูปจาก MT5 มาถึง Telegram แล้ว และเลือกรูปแบบ “รายละเอียดครบ” จากตัวอย่าง. 1.07 เปลี่ยนเฉพาะข้อความ/ภาพ: HTML bold/code, ภาษาไทยแยกหัวข้อ, ID แสดง 8 ตัว, caption สั้น และ Canvas พื้นเข้มพร้อมตัวอักษรใหญ่และ label ที่วัดความกว้าง. ชื่อ symbol/legacy plaintext escape ก่อนใช้ parse_mode=HTML. Legacy record ไม่ถูก rewrite; schema 1 เดิม
+
+Source/hash review ยืนยัน runtime, validation, Anchor/FVG/quote-session cores, queue/checkpoint schema, ConfigurationKey, presets, indicator และ Pine ไม่เปลี่ยน. SignalRecord จัดรูปแบบใหม่แต่เวลา/ราคา/frozen signal_tip/ID เต็มเดิม. Text-first, retry, receipt และ cancellation conditions คงเดิม. ส่ง % Strong เฉพาะ pattern ที่มี Strong ไม่ใช้ % ไปกรอง FVG
+
+MetaEditor Detector/Sender ผ่าน **0 errors / 0 warnings** ทั้งคู่. ตรวจ compiler/source/ZIP manifest เท่านั้น ไม่มี tests/backtest, ไม่ติดตั้ง EA และไม่ส่ง Telegram จริงเพิ่ม. Inline preview ตรวจสองแบบ/แสงมืด/สว่าง/ความกว้างมือถือแล้ว แต่เป็นกราฟจำลอง ไม่ใช่ผล Canvas บน VPS. ยังไม่ได้ยืนยันฟอนต์/DPI ของ Wine บน VPS หรือการแสดง HTML/caption จากสัญญาณจริงของรุ่น 1.07
+
+อัปเดต EX5 ทั้ง detector และ sender เป็น 1.07 ใช้ Input/Channel/InstanceID เดิมและเก็บคิว/receipt/checkpoint เดิมไว้. ดูข้อความใหม่เป็นหัวข้อหนาและ caption ไม่ซ้ำทั้งข้อความ; กราฟต้องแสดง MAIN TF/CHECK TF กับ ID สั้นเดียวกัน. ค่า signal conditions คงเดิม
+
+## ประวัติ build ก่อนหน้า
+
 # Verification status — 1.06
 
 วันที่ 2026-10-07. ผู้ใช้ส่ง native VPS log ของ 1.05: record-write/flush error=4009 ที่ active.tmp ซ้ำ. 4009 = ERR_NOTINITIALIZED_STRING ตามเอกสาร MQL5; source เดิม StringToCharArray บน optional empty/deinitialized fields สอดคล้องกับอาการ. แก้ writer ให้ NULL/empty เขียน 4-byte length=0 ก่อนแปลง UTF-8; ตรวจ length-prefix byte count และระบุ optional signal fields เป็น empty ก่อนใช้งาน.
