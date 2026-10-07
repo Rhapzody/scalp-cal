@@ -1,0 +1,8 @@
+.DS_Store
+*.ex5
+dist/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
